@@ -93,6 +93,7 @@ export interface AppSnapshot {
   sendMode: SendMode
   leftSidebarCollapsed: boolean
   rightSidebarCollapsed: boolean
+  agentBusy: boolean
   headerText: string
   statusText: string
   conversationTabsText: string
@@ -219,6 +220,7 @@ export class PiConductorApp {
 
   private leftSidebarCollapsed = false
   private rightSidebarCollapsed = false
+  private agentBusy = false
   private isShuttingDown = false
 
   private headerText = "Piductor · loading..."
@@ -243,6 +245,7 @@ export class PiConductorApp {
     sendMode: "prompt",
     leftSidebarCollapsed: false,
     rightSidebarCollapsed: false,
+    agentBusy: false,
     headerText: this.headerText,
     statusText: this.statusText,
     conversationTabsText: this.conversationTabsText,
@@ -309,6 +312,7 @@ export class PiConductorApp {
       sendMode: this.sendMode,
       leftSidebarCollapsed: this.leftSidebarCollapsed,
       rightSidebarCollapsed: this.rightSidebarCollapsed,
+      agentBusy: this.agentBusy,
       headerText: this.headerText,
       statusText: this.statusText,
       conversationTabsText: this.conversationTabsText,
@@ -1641,7 +1645,7 @@ export class PiConductorApp {
     const turnInFlight = workspace ? this.agentTurnsInFlight.has(workspace.id) : false
     const shouldShowAgentSpinner = agentStatus === "starting" || turnInFlight
     const agentStatusLabel = turnInFlight ? "running" : agentStatus
-    const agentLoadingSuffix = shouldShowAgentSpinner ? ` ${LOADING_TOKEN}` : ""
+    this.agentBusy = shouldShowAgentSpinner
 
     this.headerText = workspace
       ? `${repo?.name ?? "repo"}/${workspace.name} · ${workspace.branch} · mode=${this.sendMode} · ${mergeState}`
@@ -1651,7 +1655,7 @@ export class PiConductorApp {
       `repo       ${repo ? `${repo.name} (#${repo.id})` : "<none>"}`,
       `workspace  ${workspace ? `${workspace.name} (#${workspace.id})` : "<none>"}`,
       `branch     ${workspace?.branch ?? "<none>"}`,
-      `agent      ${agentStatusLabel}${agentLoadingSuffix}${agent?.pid ? ` (pid ${agent.pid})` : ""}`,
+      `agent      ${agentStatusLabel}${agent?.pid ? ` (pid ${agent.pid})` : ""}`,
       `run        ${runState}`,
       `changes    ${changedCount} files · ${mergeState}`,
     ]
@@ -1869,7 +1873,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
   const changesSectionHeader = formatSectionHeader("Changes", changesSectionCollapsed, rightSectionHeaderWidth)
   const terminalSectionHeader = formatSectionHeader("Run Terminal", terminalSectionCollapsed, rightSectionHeaderWidth)
 
-  const hasLoadingToken = snapshot.statusText.includes(LOADING_TOKEN)
+  const hasLoadingToken = snapshot.agentBusy
   useEffect(() => {
     if (!hasLoadingToken) {
       setLoadingFrameIndex(0)
@@ -1883,10 +1887,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
     return () => clearInterval(timer)
   }, [hasLoadingToken])
 
-  const animatedStatusText = useMemo(
-    () => renderLoadingTokens(snapshot.statusText, loadingFrameIndex),
-    [snapshot.statusText, loadingFrameIndex],
-  )
+  const composerSpinner = hasLoadingToken ? renderLoadingTokens(LOADING_TOKEN, loadingFrameIndex) : ""
 
   const workspaceTreeHasFocus = focusTarget === "workspace" || focusTarget === "repo"
 
@@ -2344,17 +2345,15 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
         >
           <box
             id="pc-conversation-box"
-            title="Conversation"
-            titleAlignment="left"
-            border
-            borderStyle="single"
-            borderColor="#2a3344"
             backgroundColor="#100f13"
             shouldFill
             style={{
               flexDirection: "column",
               flexGrow: 1,
               marginBottom: 1,
+              paddingLeft: 1,
+              paddingRight: 1,
+              paddingTop: 1,
             }}
           >
             <text
@@ -2403,24 +2402,20 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
 
           <box
             id="pc-input-box"
-            title="Composer"
-            titleAlignment="left"
-            border
-            borderStyle="single"
-            borderColor="#4b5563"
-            focusedBorderColor="#f59e0b"
-            height={5}
+            height={4}
             backgroundColor="#151922"
             shouldFill
             style={{
               flexShrink: 0,
+              paddingLeft: 1,
+              paddingRight: 1,
               paddingTop: 1,
             }}
           >
             <text
               id="pc-compose-hint"
-              content=" /help · /mode prompt|steer|follow_up · plain text sends to selected workspace"
-              fg="#9ca3af"
+              content={`${hasLoadingToken ? `${composerSpinner} ` : ""}Composer · /help · /mode prompt|steer|follow_up`}
+              fg={hasLoadingToken ? "#93c5fd" : "#9ca3af"}
               style={{
                 flexShrink: 0,
               }}
@@ -2518,7 +2513,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
               {!statusSectionCollapsed && (
                 <text
                   id="pc-status-text"
-                  content={animatedStatusText}
+                  content={snapshot.statusText}
                   fg="#d1d5db"
                   wrapMode="word"
                   style={{
