@@ -22,6 +22,7 @@ import {
   ensureRepoFromLocalPath,
   getChangedFiles,
   getChangedFileStats,
+  getDefaultBranchName,
   listBranchRefs,
   removeWorktree,
   resolveWorkspaceBaseRef,
@@ -35,6 +36,7 @@ import {
 } from "./workspace-tree"
 import { parseWorkspaceNewArgs, workspaceNewUsage } from "./workspace-new"
 import { extractFirstUrl, parsePrCreateArgs, prCreateUsage } from "./pr-command"
+import { buildWorkspaceScriptEnv } from "./script-env"
 
 const GLOBAL_LOG_STREAM_ID = 0
 
@@ -1017,6 +1019,12 @@ export class PiConductorApp {
       return
     }
 
+    const repo = this.store.getRepoById(workspace.repoId)
+    if (!repo) {
+      this.appendGlobalLog(`Repo for workspace ${workspace.name} not found for ${label} script.`)
+      return
+    }
+
     if (this.config.scripts.runMode === "nonconcurrent") {
       const existing = this.runProcessByWorkspace.get(workspaceId)
       if (existing) {
@@ -1025,10 +1033,18 @@ export class PiConductorApp {
       }
     }
 
+    const defaultBranch = getDefaultBranchName(repo.rootPath)
+    const scriptEnv = buildWorkspaceScriptEnv({
+      baseEnv: process.env,
+      repo,
+      workspace,
+      defaultBranch,
+    })
+
     const child = spawn("bash", ["-lc", command], {
       cwd: workspace.worktreePath,
       stdio: ["pipe", "pipe", "pipe"],
-      env: process.env,
+      env: scriptEnv,
     })
 
     child.stdout.setEncoding("utf8")

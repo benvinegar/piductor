@@ -111,6 +111,18 @@ Legacy `piconductor` config/data paths are still detected for backward compatibi
 }
 ```
 
+### Script environment variables
+
+Setup/run/archive scripts receive these vars:
+
+- `PIDUCTOR_WORKSPACE_NAME`
+- `PIDUCTOR_WORKSPACE_PATH`
+- `PIDUCTOR_ROOT_PATH`
+- `PIDUCTOR_DEFAULT_BRANCH`
+- `PIDUCTOR_PORT` (base of a 10-port range for the workspace)
+
+Compatibility aliases are also provided with `CONDUCTOR_*` names.
+
 ### Default storage paths
 
 - `dataDir`: `./.piductor`

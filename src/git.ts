@@ -92,6 +92,22 @@ export function listBranchRefs(repoRoot: string): string[] {
   return [...new Set([...local, ...remote])]
 }
 
+export function getDefaultBranchName(repoRoot: string): string {
+  const symbolic = runAllowError("git", ["-C", repoRoot, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"])
+  const symbolicText = String(symbolic.stdout ?? "").trim()
+  if (symbolic.status === 0 && symbolicText.startsWith("origin/")) {
+    return symbolicText.slice("origin/".length)
+  }
+
+  const head = runAllowError("git", ["-C", repoRoot, "rev-parse", "--abbrev-ref", "HEAD"])
+  const headText = String(head.stdout ?? "").trim()
+  if (head.status === 0 && headText && headText !== "HEAD") {
+    return headText
+  }
+
+  return "main"
+}
+
 function findUniqueBranch(repoRoot: string, branchBase: string): string {
   if (!branchExists(repoRoot, branchBase)) return branchBase
 
