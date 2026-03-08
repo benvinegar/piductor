@@ -58,6 +58,70 @@ Treat this as a deliberate split:
   - tool lines (`⚙️`)
 - Agent extension UI requests are auto-cancelled (non-blocking)
 
+## Visual style system (important)
+
+Future UI changes should match the current minimal style language.
+
+### Border philosophy
+
+- Avoid superfluous nested boxes.
+- Keep strong borders where they help structure:
+  - top bar
+  - center conversation/composer containers
+- Left and right sidebars should be **flat** (no outer border box, no per-section border boxes).
+
+### Sidebar section pattern (left + right)
+
+Use collapsible text headers instead of boxed sections.
+
+- Header format: `▾ <Title> ─────` (expanded) / `▸ <Title> ─────` (collapsed)
+- Use `formatSectionHeader(title, collapsed, width)` to build header lines.
+- Header is clickable (`onMouseDown`) to toggle collapsed state.
+- Keep one blank line of breathing room between major sections.
+- Body content appears with a small top margin under header (`marginTop: 1`).
+
+Current sections to keep stylistically consistent:
+
+Left sidebar:
+1. Repositories
+2. Workspaces
+
+Right sidebar:
+1. Workspace Status
+2. Changes
+3. Run Terminal
+
+### Color/style tokens to reuse
+
+- Left panel background: `#11151f`
+- Right panel background: `#111013`
+- Sidebar section header bg:
+  - expanded: `#182031`
+  - collapsed: `#1a2332`
+- Sidebar section header text: `#bfdbfe`
+- Status/diff body text: `#d1d5db`
+- Terminal body text: `#a7f3d0`
+- Resizer colors:
+  - idle: `#273142`
+  - active/dragging: `#60a5fa`
+
+### Layout sizing rules
+
+- Keep existing width constraints unless explicitly requested:
+  - left: min `24`, default `36`, max `72`
+  - right: min `34`, default `52`, max `84`
+  - center min width: `52`
+- Side panels use light horizontal padding (`paddingLeft: 1`, `paddingRight: 1`).
+- Repositories section keeps compact fixed height when expanded (currently `10`).
+- Run Terminal section uses fixed compact height when expanded (currently `10`).
+
+### Interaction consistency
+
+- Resizer remains the visual separator between columns (1-cell draggable bar).
+- Drag robustness uses body-level mouse handlers; preserve this approach.
+- `Ctrl+1` / `Ctrl+2` should reveal and focus repo/workspace lists even if those sections were collapsed.
+- Any new mouse interaction should still have keyboard/command fallback where practical.
+
 ## Command surface (keep backward compatible)
 
 `/help`, `/repo ...`, `/workspace ...`, `/agent ...`, `/mode ...`, `/run ...`, `/status`, `/diff`, `/ui ...`

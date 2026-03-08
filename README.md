@@ -18,7 +18,7 @@ Built with:
 - Surface thinking/tool/status events in a readable way
 - Run setup/run/archive scripts per workspace
 - Show per-file change stats (`+/-`) in a review panel
-- Collapse sidebars and resize side columns with mouse drag
+- Collapse sidebars, resize side columns with mouse drag, and collapse right-panel sections
 
 ## Install
 
@@ -73,6 +73,7 @@ Plain text input sends a message to the selected workspace agent using the curre
 - `Ctrl+C` exit
 - Click top-bar `[+] / [-]` toggles to collapse sidebars
 - Drag vertical separators to resize left/right columns
+- Click sidebar section headers to collapse/expand repositories, workspaces, status, changes, and run terminal
 
 ## Configuration
 

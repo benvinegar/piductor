@@ -55,6 +55,13 @@ function maxRightWidth(totalWidth: number, leftVisible: boolean, leftWidth: numb
   return totalWidth - (leftVisible ? leftWidth : 0) - splitters - MIN_CENTER_WIDTH
 }
 
+function formatSectionHeader(title: string, collapsed: boolean, width: number): string {
+  const icon = collapsed ? "▸" : "▾"
+  const prefix = `${icon} ${title} `
+  const filler = Math.max(0, width - prefix.length)
+  return `${prefix}${"─".repeat(filler)}`
+}
+
 export interface AppSnapshot {
   repos: RepoRecord[]
   workspaces: WorkspaceRecord[]
@@ -396,6 +403,7 @@ export class PiConductorApp {
         this.appendGlobalLog("Plain text sends to selected agent in current mode.")
         this.appendGlobalLog("UI: click [+]/[-] in top bar to collapse sidebars (or ctrl+left / ctrl+right).")
         this.appendGlobalLog("UI: drag the vertical separators to resize side columns.")
+        this.appendGlobalLog("UI: click sidebar section headers to collapse/expand sections.")
         return
       }
 
@@ -1315,6 +1323,11 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
   const [leftColumnWidth, setLeftColumnWidth] = useState(36)
   const [rightColumnWidth, setRightColumnWidth] = useState(52)
   const [resizeState, setResizeState] = useState<ResizeState | null>(null)
+  const [repoSectionCollapsed, setRepoSectionCollapsed] = useState(false)
+  const [workspaceSectionCollapsed, setWorkspaceSectionCollapsed] = useState(false)
+  const [statusSectionCollapsed, setStatusSectionCollapsed] = useState(false)
+  const [changesSectionCollapsed, setChangesSectionCollapsed] = useState(false)
+  const [terminalSectionCollapsed, setTerminalSectionCollapsed] = useState(false)
 
   const conversationSyntaxStyle = useMemo(
     () =>
@@ -1350,11 +1363,31 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
   const leftVisible = !snapshot.leftSidebarCollapsed
   const rightVisible = !snapshot.rightSidebarCollapsed
 
+  const leftSectionHeaderWidth = Math.max(12, leftColumnWidth - 2)
+  const repoSectionHeader = formatSectionHeader("Repositories", repoSectionCollapsed, leftSectionHeaderWidth)
+  const workspaceSectionHeader = formatSectionHeader("Workspaces", workspaceSectionCollapsed, leftSectionHeaderWidth)
+
+  const rightSectionHeaderWidth = Math.max(12, rightColumnWidth - 2)
+  const statusSectionHeader = formatSectionHeader("Workspace Status", statusSectionCollapsed, rightSectionHeaderWidth)
+  const changesSectionHeader = formatSectionHeader("Changes", changesSectionCollapsed, rightSectionHeaderWidth)
+  const terminalSectionHeader = formatSectionHeader("Run Terminal", terminalSectionCollapsed, rightSectionHeaderWidth)
+
   useEffect(() => {
     if (snapshot.leftSidebarCollapsed && (focusTarget === "repo" || focusTarget === "workspace")) {
       setFocusTarget("input")
     }
   }, [snapshot.leftSidebarCollapsed, focusTarget])
+
+  useEffect(() => {
+    if (repoSectionCollapsed && focusTarget === "repo") {
+      setFocusTarget(workspaceSectionCollapsed ? "input" : "workspace")
+      return
+    }
+
+    if (workspaceSectionCollapsed && focusTarget === "workspace") {
+      setFocusTarget(repoSectionCollapsed ? "input" : "repo")
+    }
+  }, [repoSectionCollapsed, workspaceSectionCollapsed, focusTarget])
 
   useEffect(() => {
     if (resizeState?.edge === "left" && !leftVisible) {
@@ -1415,6 +1448,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
       if (snapshot.leftSidebarCollapsed) {
         app.toggleLeftSidebar()
       }
+      setRepoSectionCollapsed(false)
       setFocusTarget("repo")
       return
     }
@@ -1424,6 +1458,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
       if (snapshot.leftSidebarCollapsed) {
         app.toggleLeftSidebar()
       }
+      setWorkspaceSectionCollapsed(false)
       setFocusTarget("workspace")
       return
     }
@@ -1448,15 +1483,27 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
 
     if (key.name === "tab") {
       key.preventDefault()
-      if (snapshot.leftSidebarCollapsed) {
+      const tabTargets: FocusTarget[] = ["input"]
+
+      if (!snapshot.leftSidebarCollapsed && !repoSectionCollapsed) {
+        tabTargets.push("repo")
+      }
+
+      if (!snapshot.leftSidebarCollapsed && !workspaceSectionCollapsed) {
+        tabTargets.push("workspace")
+      }
+
+      if (tabTargets.length === 1) {
         setFocusTarget("input")
         return
       }
 
       setFocusTarget((prev) => {
-        if (prev === "input") return "repo"
-        if (prev === "repo") return "workspace"
-        return "input"
+        const index = tabTargets.indexOf(prev)
+        if (index === -1) {
+          return tabTargets[0] ?? "input"
+        }
+        return tabTargets[(index + 1) % tabTargets.length] ?? "input"
       })
       return
     }
@@ -1591,84 +1638,136 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
           <box
             id="pc-sidebar"
             width={leftColumnWidth}
-            border
-            borderStyle="single"
-            borderColor="#2a3344"
             backgroundColor="#11151f"
             shouldFill
             style={{
               flexDirection: "column",
+              paddingLeft: 1,
+              paddingRight: 1,
             }}
           >
-            <text id="pc-nav-title" content=" Workspace Navigator" fg="#e5e7eb" style={{ flexShrink: 0 }} />
-
             <box
-              id="pc-repo-box"
-              title="Repositories"
-              titleAlignment="left"
-              border
-              borderStyle="single"
-              borderColor="#3a4459"
-              focusedBorderColor="#60a5fa"
-              height={10}
-              shouldFill
+              id="pc-repo-section"
+              height={repoSectionCollapsed ? 1 : 10}
               style={{
-                marginTop: 1,
-                marginBottom: 1,
+                flexDirection: "column",
                 flexShrink: 0,
+                marginBottom: 1,
               }}
             >
-              <select
-                id="pc-repo-select"
-                focused={focusTarget === "repo"}
-                options={snapshot.repoOptions}
-                selectedIndex={snapshot.repoSelectedIndex}
-                height="100%"
-                showDescription
-                wrapSelection
-                selectedBackgroundColor="#1d4ed8"
-                selectedTextColor="#e2e8f0"
-                textColor="#cbd5e1"
-                descriptionColor="#64748b"
-                selectedDescriptionColor="#93c5fd"
-                showScrollIndicator
-                onChange={(_, option) => {
-                  app.selectRepoOption(option)
+              <box
+                id="pc-repo-header"
+                height={1}
+                backgroundColor={repoSectionCollapsed ? "#1a2332" : "#182031"}
+                onMouseDown={() => {
+                  setRepoSectionCollapsed((prev) => !prev)
                 }}
-              />
+                style={{
+                  flexShrink: 0,
+                  flexDirection: "row",
+                  alignItems: "center",
+                }}
+              >
+                <text
+                  id="pc-repo-header-text"
+                  content={repoSectionHeader}
+                  fg="#bfdbfe"
+                  wrapMode="none"
+                  selectable={false}
+                />
+              </box>
+
+              {!repoSectionCollapsed && (
+                <box
+                  id="pc-repo-body"
+                  height={8}
+                  style={{
+                    marginTop: 1,
+                    flexShrink: 0,
+                  }}
+                >
+                  <select
+                    id="pc-repo-select"
+                    focused={focusTarget === "repo"}
+                    options={snapshot.repoOptions}
+                    selectedIndex={snapshot.repoSelectedIndex}
+                    height="100%"
+                    showDescription
+                    wrapSelection
+                    selectedBackgroundColor="#1d4ed8"
+                    selectedTextColor="#e2e8f0"
+                    textColor="#cbd5e1"
+                    descriptionColor="#64748b"
+                    selectedDescriptionColor="#93c5fd"
+                    showScrollIndicator
+                    onChange={(_, option) => {
+                      app.selectRepoOption(option)
+                    }}
+                  />
+                </box>
+              )}
             </box>
 
             <box
-              id="pc-workspace-box"
-              title="Workspaces"
-              titleAlignment="left"
-              border
-              borderStyle="single"
-              borderColor="#3a4459"
-              focusedBorderColor="#34d399"
-              shouldFill
+              id="pc-workspace-section"
+              shouldFill={!workspaceSectionCollapsed}
               style={{
-                flexGrow: 1,
+                flexDirection: "column",
+                flexGrow: workspaceSectionCollapsed ? 0 : 1,
+                flexShrink: 0,
               }}
             >
-              <select
-                id="pc-workspace-select"
-                focused={focusTarget === "workspace"}
-                options={snapshot.workspaceOptions}
-                selectedIndex={snapshot.workspaceSelectedIndex}
-                height="100%"
-                showDescription
-                wrapSelection
-                selectedBackgroundColor="#065f46"
-                selectedTextColor="#ecfeff"
-                textColor="#cbd5e1"
-                descriptionColor="#64748b"
-                selectedDescriptionColor="#a7f3d0"
-                showScrollIndicator
-                onChange={(_, option) => {
-                  app.selectWorkspaceOption(option)
+              <box
+                id="pc-workspace-header"
+                height={1}
+                backgroundColor={workspaceSectionCollapsed ? "#1a2332" : "#182031"}
+                onMouseDown={() => {
+                  setWorkspaceSectionCollapsed((prev) => !prev)
                 }}
-              />
+                style={{
+                  flexShrink: 0,
+                  flexDirection: "row",
+                  alignItems: "center",
+                }}
+              >
+                <text
+                  id="pc-workspace-header-text"
+                  content={workspaceSectionHeader}
+                  fg="#bfdbfe"
+                  wrapMode="none"
+                  selectable={false}
+                />
+              </box>
+
+              {!workspaceSectionCollapsed && (
+                <box
+                  id="pc-workspace-body"
+                  shouldFill
+                  style={{
+                    marginTop: 1,
+                    flexGrow: 1,
+                  }}
+                >
+                  <select
+                    id="pc-workspace-select"
+                    focused={focusTarget === "workspace"}
+                    options={snapshot.workspaceOptions}
+                    selectedIndex={snapshot.workspaceSelectedIndex}
+                    height="100%"
+                    showDescription
+                    wrapSelection
+                    selectedBackgroundColor="#065f46"
+                    selectedTextColor="#ecfeff"
+                    textColor="#cbd5e1"
+                    descriptionColor="#64748b"
+                    selectedDescriptionColor="#a7f3d0"
+                    showScrollIndicator
+                    onChange={(_, option) => {
+                      app.selectWorkspaceOption(option)
+                    }}
+                  />
+                </box>
+              )}
             </box>
           </box>
         )}
@@ -1839,78 +1938,145 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
           <box
             id="pc-right"
             width={rightColumnWidth}
-            border
-            borderStyle="single"
-            borderColor="#2a3344"
             backgroundColor="#111013"
             shouldFill
             style={{
               flexDirection: "column",
+              paddingLeft: 1,
+              paddingRight: 1,
             }}
           >
             <box
-              id="pc-status-box"
-              title="Workspace Status"
-              titleAlignment="left"
-              border
-              borderStyle="single"
-              borderColor="#3a4459"
-              height={8}
-              shouldFill
+              id="pc-status-section"
               style={{
-                marginBottom: 1,
+                flexDirection: "column",
                 flexShrink: 0,
-              }}
-            >
-              <text id="pc-status-text" content={snapshot.statusText} fg="#d1d5db" wrapMode="word" />
-            </box>
-
-            <box
-              id="pc-diff-box"
-              title="Changes"
-              titleAlignment="left"
-              border
-              borderStyle="single"
-              borderColor="#3a4459"
-              shouldFill
-              style={{
-                flexGrow: 1,
                 marginBottom: 1,
               }}
             >
-              <text
-                id="pc-diff-text"
-                content={snapshot.diffText}
-                fg="#d1d5db"
-                wrapMode="none"
-                style={{
-                  flexGrow: 1,
+              <box
+                id="pc-status-header"
+                height={1}
+                backgroundColor={statusSectionCollapsed ? "#1a2332" : "#182031"}
+                onMouseDown={() => {
+                  setStatusSectionCollapsed((prev) => !prev)
                 }}
-              />
+                style={{
+                  flexShrink: 0,
+                  flexDirection: "row",
+                  alignItems: "center",
+                }}
+              >
+                <text
+                  id="pc-status-header-text"
+                  content={statusSectionHeader}
+                  fg="#bfdbfe"
+                  wrapMode="none"
+                  selectable={false}
+                />
+              </box>
+
+              {!statusSectionCollapsed && (
+                <text
+                  id="pc-status-text"
+                  content={snapshot.statusText}
+                  fg="#d1d5db"
+                  wrapMode="word"
+                  style={{
+                    marginTop: 1,
+                  }}
+                />
+              )}
             </box>
 
             <box
-              id="pc-terminal-box"
-              title="Run Terminal"
-              titleAlignment="left"
-              border
-              borderStyle="single"
-              borderColor="#3a4459"
-              height={10}
-              shouldFill
+              id="pc-diff-section"
+              shouldFill={!changesSectionCollapsed}
               style={{
+                flexDirection: "column",
+                flexGrow: changesSectionCollapsed ? 0 : 1,
+                flexShrink: changesSectionCollapsed ? 0 : 1,
+                marginBottom: 1,
+              }}
+            >
+              <box
+                id="pc-diff-header"
+                height={1}
+                backgroundColor={changesSectionCollapsed ? "#1a2332" : "#182031"}
+                onMouseDown={() => {
+                  setChangesSectionCollapsed((prev) => !prev)
+                }}
+                style={{
+                  flexShrink: 0,
+                  flexDirection: "row",
+                  alignItems: "center",
+                }}
+              >
+                <text
+                  id="pc-diff-header-text"
+                  content={changesSectionHeader}
+                  fg="#bfdbfe"
+                  wrapMode="none"
+                  selectable={false}
+                />
+              </box>
+
+              {!changesSectionCollapsed && (
+                <text
+                  id="pc-diff-text"
+                  content={snapshot.diffText}
+                  fg="#d1d5db"
+                  wrapMode="none"
+                  style={{
+                    flexGrow: 1,
+                    marginTop: 1,
+                  }}
+                />
+              )}
+            </box>
+
+            <box
+              id="pc-terminal-section"
+              height={terminalSectionCollapsed ? 1 : 10}
+              style={{
+                flexDirection: "column",
                 flexShrink: 0,
               }}
             >
-              <text
-                id="pc-terminal-text"
-                content={snapshot.terminalText}
-                fg="#a7f3d0"
-                wrapMode="none"
-                style={{
-                  flexGrow: 1,
+              <box
+                id="pc-terminal-header"
+                height={1}
+                backgroundColor={terminalSectionCollapsed ? "#1a2332" : "#182031"}
+                onMouseDown={() => {
+                  setTerminalSectionCollapsed((prev) => !prev)
                 }}
-              />
+                style={{
+                  flexShrink: 0,
+                  flexDirection: "row",
+                  alignItems: "center",
+                }}
+              >
+                <text
+                  id="pc-terminal-header-text"
+                  content={terminalSectionHeader}
+                  fg="#bfdbfe"
+                  wrapMode="none"
+                  selectable={false}
+                />
+              </box>
+
+              {!terminalSectionCollapsed && (
+                <text
+                  id="pc-terminal-text"
+                  content={snapshot.terminalText}
+                  fg="#a7f3d0"
+                  wrapMode="none"
+                  style={{
+                    flexGrow: 1,
+                    marginTop: 1,
+                  }}
+                />
+              )}
             </box>
           </box>
         )}
