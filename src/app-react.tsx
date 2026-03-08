@@ -2202,6 +2202,28 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                             marginBottom: isRepoRow ? 0 : 1,
                           }}
                         >
+                          <text
+                            id={`pc-workspace-tree-row-marker-${index}`}
+                            content={marker}
+                            fg={selected ? "#93c5fd" : "#64748b"}
+                            selectable={false}
+                            style={{
+                              flexShrink: 0,
+                              marginRight: 1,
+                            }}
+                          />
+
+                          <text
+                            id={`pc-workspace-tree-row-text-${index}`}
+                            content={option.name}
+                            fg={selected ? "#e2e8f0" : isRepoRow ? "#dbeafe" : "#cbd5e1"}
+                            wrapMode="none"
+                            style={{
+                              flexGrow: 1,
+                              flexShrink: 1,
+                            }}
+                          />
+
                           {!isRepoRow && (
                             <text
                               id={`pc-workspace-tree-row-plus-${index}`}
@@ -2211,6 +2233,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                               selectable={false}
                               style={{
                                 flexShrink: 0,
+                                marginLeft: 1,
                                 marginRight: 1,
                               }}
                             />
@@ -2225,32 +2248,9 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                               selectable={false}
                               style={{
                                 flexShrink: 0,
-                                marginRight: 1,
                               }}
                             />
                           )}
-
-                          <text
-                            id={`pc-workspace-tree-row-text-${index}`}
-                            content={option.name}
-                            fg={selected ? "#e2e8f0" : isRepoRow ? "#dbeafe" : "#cbd5e1"}
-                            wrapMode="none"
-                            style={{
-                              flexGrow: 1,
-                              flexShrink: 1,
-                            }}
-                          />
-
-                          <text
-                            id={`pc-workspace-tree-row-marker-${index}`}
-                            content={marker}
-                            fg={selected ? "#93c5fd" : "#64748b"}
-                            selectable={false}
-                            style={{
-                              flexShrink: 0,
-                              marginLeft: 1,
-                            }}
-                          />
                         </box>
                       )
                     })}
