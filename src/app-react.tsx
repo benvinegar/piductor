@@ -959,13 +959,23 @@ export class PiConductorApp {
     }
 
     this.appendWorkspaceLog(workspace.id, `[you/${this.sendMode}] ${message}`)
+    this.agentTurnsInFlight.add(workspace.id)
+    this.refreshStatusPanel()
+    this.emitSnapshot()
 
-    if (this.sendMode === "prompt") {
-      await agent.prompt(message)
-    } else if (this.sendMode === "steer") {
-      await agent.steer(message)
-    } else {
-      await agent.followUp(message)
+    try {
+      if (this.sendMode === "prompt") {
+        await agent.prompt(message)
+      } else if (this.sendMode === "steer") {
+        await agent.steer(message)
+      } else {
+        await agent.followUp(message)
+      }
+    } catch (error) {
+      this.agentTurnsInFlight.delete(workspace.id)
+      this.refreshStatusPanel()
+      this.emitSnapshot()
+      throw error
     }
   }
 
