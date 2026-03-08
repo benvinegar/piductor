@@ -79,6 +79,23 @@ function formatSectionHeader(title: string, collapsed: boolean, width: number): 
   return `${prefix}${"─".repeat(filler)}`
 }
 
+function formatUserMessageBox(content: string): string {
+  const rawLines = content.split(/\r?\n/).map((line) => line.trimEnd())
+  const lines = rawLines.length > 0 ? rawLines : [""]
+  const longest = Math.max(...lines.map((line) => line.length), 8)
+  const width = Math.min(72, Math.max(8, longest))
+
+  const clipped = lines.map((line) => {
+    if (line.length <= width) return line
+    return `${line.slice(0, Math.max(0, width - 1))}…`
+  })
+
+  const top = `╭${"─".repeat(width + 2)}╮`
+  const body = clipped.map((line) => `│ ${line}${" ".repeat(Math.max(0, width - line.length))} │`)
+  const bottom = `╰${"─".repeat(width + 2)}╯`
+  return [top, ...body, bottom].join("\n")
+}
+
 export interface AppSnapshot {
   repos: RepoRecord[]
   workspaces: WorkspaceRecord[]
@@ -1698,7 +1715,7 @@ export class PiConductorApp {
       if (line.startsWith("[you/")) {
         flushAssistant()
         const content = line.replace(/^\[you\/[\w_\-]+\]\s*/, "")
-        rendered.push(`### You\n\n${content}`)
+        rendered.push(`\`\`\`text\n${formatUserMessageBox(content)}\n\`\`\``)
         continue
       }
 
