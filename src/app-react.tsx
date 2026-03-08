@@ -103,6 +103,11 @@ function formatUserMessageBox(content: string): string {
   return [top, ...body, bottom].join("\n")
 }
 
+function formatAssistantMessageRail(content: string): string {
+  const lines = content.split(/\r?\n/)
+  return lines.map((line) => `│ ${line}`).join("\n")
+}
+
 export interface AppSnapshot {
   repos: RepoRecord[]
   workspaces: WorkspaceRecord[]
@@ -1288,9 +1293,7 @@ export class PiConductorApp {
       case "message_end":
         this.flushThinkingPartial(workspaceId)
         this.flushAssistantPartial(workspaceId)
-        if (event?.message?.role === "assistant") {
-          this.appendWorkspaceLog(workspaceId, "[assistant-break]")
-        }
+        this.appendWorkspaceLog(workspaceId, "[assistant-break]")
         break
 
       case "turn_end":
@@ -1722,7 +1725,7 @@ export class PiConductorApp {
 
     const flushAssistant = () => {
       if (pendingAssistant.length === 0) return
-      rendered.push(pendingAssistant.join("\n"))
+      rendered.push(`\`\`\`text\n${formatAssistantMessageRail(pendingAssistant.join("\n"))}\n\`\`\``)
       pendingAssistant = []
     }
 
