@@ -1560,6 +1560,26 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
       <box
         id="pc-body"
         shouldFill
+        onMouseMove={(event) => {
+          if (!resizeState) return
+          event.preventDefault()
+          dragResize(resizeState.edge, event.x)
+        }}
+        onMouseDrag={(event) => {
+          if (!resizeState) return
+          event.preventDefault()
+          dragResize(resizeState.edge, event.x)
+        }}
+        onMouseUp={() => {
+          if (resizeState) {
+            setResizeState(null)
+          }
+        }}
+        onMouseDragEnd={() => {
+          if (resizeState) {
+            setResizeState(null)
+          }
+        }}
         style={{
           flexDirection: "row",
           flexGrow: 1,
