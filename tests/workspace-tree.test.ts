@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest"
 import {
+  encodeWorkspaceTreeRowMeta,
+  formatWorkspaceActivityAge,
+  formatWorkspaceStatusLabel,
   formatWorkspaceTreeRowName,
+  parseWorkspaceTreeRowMeta,
   parseWorkspaceTreeValue,
   repoTreeValue,
   workspaceTreeValue,
@@ -48,5 +52,43 @@ describe("workspace-tree helpers", () => {
         removed: 4,
       }),
     ).toBe("  pc/feature-a")
+  })
+
+  it("encodes and parses workspace row metadata", () => {
+    const encoded = encodeWorkspaceTreeRowMeta({
+      added: 12,
+      removed: 4,
+      status: "running",
+      activityAt: "2026-03-08T23:45:00.000Z",
+    })
+
+    expect(parseWorkspaceTreeRowMeta(encoded)).toEqual({
+      added: 12,
+      removed: 4,
+      status: "running",
+      activityAt: "2026-03-08T23:45:00.000Z",
+    })
+
+    expect(parseWorkspaceTreeRowMeta("not-json")).toEqual({
+      added: 0,
+      removed: 0,
+      status: "stopped",
+      activityAt: null,
+    })
+  })
+
+  it("formats status labels and relative activity age", () => {
+    expect(formatWorkspaceStatusLabel("starting")).toBe("starting")
+    expect(formatWorkspaceStatusLabel("running")).toBe("running")
+    expect(formatWorkspaceStatusLabel("error")).toBe("error")
+    expect(formatWorkspaceStatusLabel("stopped")).toBe("stopped")
+
+    const now = Date.parse("2026-03-08T23:50:00.000Z")
+    expect(formatWorkspaceActivityAge("2026-03-08T23:49:58.000Z", now)).toBe("now")
+    expect(formatWorkspaceActivityAge("2026-03-08T23:49:20.000Z", now)).toBe("40s")
+    expect(formatWorkspaceActivityAge("2026-03-08T23:30:00.000Z", now)).toBe("20m")
+    expect(formatWorkspaceActivityAge("2026-03-08T20:50:00.000Z", now)).toBe("3h")
+    expect(formatWorkspaceActivityAge("2026-03-05T23:50:00.000Z", now)).toBe("3d")
+    expect(formatWorkspaceActivityAge(null, now)).toBe("-")
   })
 })

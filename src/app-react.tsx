@@ -15,7 +15,7 @@ import { createRoot, useKeyboard, useTerminalDimensions, type Root } from "@open
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
 import { Store } from "./db"
 import { PiRpcProcess } from "./pi-rpc"
-import type { AppConfig, RepoRecord, SendMode, WorkspaceRecord } from "./types"
+import type { AgentRuntimeStatus, AppConfig, RepoRecord, SendMode, WorkspaceRecord } from "./types"
 import {
   addWorktreeForBranch,
   cloneRepo,
@@ -29,7 +29,11 @@ import {
   resolveWorkspaceBaseRef,
 } from "./git"
 import {
+  encodeWorkspaceTreeRowMeta,
+  formatWorkspaceActivityAge,
+  formatWorkspaceStatusLabel,
   formatWorkspaceTreeRowName,
+  parseWorkspaceTreeRowMeta,
   parseWorkspaceTreeValue,
   repoTreeValue,
   TREE_REPO_PREFIX,
@@ -88,6 +92,19 @@ function formatSectionHeader(title: string, collapsed: boolean, width: number): 
   const prefix = `${icon} ${title} `
   const filler = Math.max(0, width - prefix.length)
   return `${prefix}${"─".repeat(filler)}`
+}
+
+function workspaceStatusColor(status: AgentRuntimeStatus): string {
+  switch (status) {
+    case "running":
+      return "#86efac"
+    case "starting":
+      return "#93c5fd"
+    case "error":
+      return "#fca5a5"
+    default:
+      return "#94a3b8"
+  }
 }
 
 type DiffRow = {
@@ -236,6 +253,7 @@ export class PiConductorApp {
   private readonly runProcessByWorkspace = new Map<number, ChildProcessWithoutNullStreams>()
   private readonly agentTurnsInFlight = new Set<number>()
   private readonly expandedRepoIds = new Set<number>()
+  private readonly lastActivityByWorkspace = new Map<number, string>()
 
   private leftSidebarCollapsed = false
   private rightSidebarCollapsed = false
@@ -1450,6 +1468,10 @@ export class PiConductorApp {
 
       for (const workspace of repoWorkspaces) {
         const { added, removed } = this.getWorkspaceDiffTotals(workspace.worktreePath)
+        const agent = this.store.getAgent(workspace.id)
+        const activityAt =
+          this.lastActivityByWorkspace.get(workspace.id) ?? agent?.lastEventAt ?? agent?.startedAt ?? agent?.stoppedAt ?? null
+
         treeOptions.push({
           name: formatWorkspaceTreeRowName({
             isRepo: false,
@@ -1459,7 +1481,12 @@ export class PiConductorApp {
             added,
             removed,
           }),
-          description: `+${added} -${removed}`,
+          description: encodeWorkspaceTreeRowMeta({
+            added,
+            removed,
+            status: agent?.status ?? "stopped",
+            activityAt,
+          }),
           value: workspaceTreeValue(repo.id, workspace.id),
         })
       }
@@ -1673,6 +1700,7 @@ export class PiConductorApp {
   }
 
   private appendWorkspaceLog(workspaceId: number, message: string) {
+    this.lastActivityByWorkspace.set(workspaceId, new Date().toISOString())
     this.appendLog(workspaceId, message)
   }
 
@@ -2261,10 +2289,12 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                       const selected = index === snapshot.workspaceTreeSelectedIndex
                       const value = String(option.value ?? "")
                       const isRepoRow = value.startsWith(TREE_REPO_PREFIX)
-                      const workspaceDiff = !isRepoRow ? String(option.description ?? "") : ""
-                      const diffMatch = workspaceDiff.match(/^(\+\S+)\s+(-\S+)$/)
-                      const plusText = diffMatch?.[1] ?? "+0"
-                      const minusText = diffMatch?.[2] ?? "-0"
+                      const meta = !isRepoRow ? parseWorkspaceTreeRowMeta(option.description) : null
+                      const plusText = meta ? `+${meta.added}` : "+0"
+                      const minusText = meta ? `-${meta.removed}` : "-0"
+                      const statusText = meta ? formatWorkspaceStatusLabel(meta.status) : ""
+                      const statusColor = meta ? workspaceStatusColor(meta.status) : "#94a3b8"
+                      const activityText = meta ? formatWorkspaceActivityAge(meta.activityAt) : ""
                       const marker = isRepoRow ? " " : selected ? "●" : "○"
 
                       return (
@@ -2298,6 +2328,20 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                             }}
                           />
 
+                          {!isRepoRow && (
+                            <text
+                              id={`pc-workspace-tree-row-status-${index}`}
+                              content={statusText}
+                              fg={statusColor}
+                              wrapMode="none"
+                              selectable={false}
+                              style={{
+                                flexShrink: 0,
+                                marginRight: 1,
+                              }}
+                            />
+                          )}
+
                           <text
                             id={`pc-workspace-tree-row-text-${index}`}
                             content={option.name}
@@ -2311,6 +2355,21 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
 
                           {!isRepoRow && (
                             <text
+                              id={`pc-workspace-tree-row-activity-${index}`}
+                              content={activityText}
+                              fg="#94a3b8"
+                              wrapMode="none"
+                              selectable={false}
+                              style={{
+                                flexShrink: 0,
+                                marginLeft: 1,
+                                marginRight: 1,
+                              }}
+                            />
+                          )}
+
+                          {!isRepoRow && (
+                            <text
                               id={`pc-workspace-tree-row-plus-${index}`}
                               content={plusText}
                               fg="#86efac"
@@ -2318,7 +2377,6 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                               selectable={false}
                               style={{
                                 flexShrink: 0,
-                                marginLeft: 1,
                                 marginRight: 1,
                               }}
                             />
