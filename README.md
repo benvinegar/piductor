@@ -126,4 +126,8 @@ Typecheck:
 npx tsc --noEmit
 ```
 
-This is currently a prototype app with no formal test suite yet.
+Run tests:
+
+```bash
+npm test
+```

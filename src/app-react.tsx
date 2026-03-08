@@ -23,6 +23,13 @@ import {
   removeWorktree,
   slugify,
 } from "./git"
+import {
+  formatWorkspaceTreeRowName,
+  parseWorkspaceTreeValue,
+  repoTreeValue,
+  TREE_REPO_PREFIX,
+  workspaceTreeValue,
+} from "./workspace-tree"
 
 const GLOBAL_LOG_STREAM_ID = 0
 
@@ -166,8 +173,6 @@ function expandUserPath(value: string): string {
 }
 
 const DEFAULT_CONVERSATION = "_No conversation yet. Start an agent and send a prompt._"
-const TREE_REPO_PREFIX = "repo:"
-const TREE_WORKSPACE_PREFIX = "workspace:"
 
 export class PiConductorApp {
   private readonly renderer: CliRenderer
@@ -359,7 +364,7 @@ export class PiConductorApp {
       this.repoOptions.findIndex((it) => Number(it.value) === this.selectedRepoId),
     )
     this.reloadWorkspaces()
-    this.rebuildWorkspaceTreeOptions(`${TREE_REPO_PREFIX}${this.selectedRepoId}`)
+    this.rebuildWorkspaceTreeOptions(repoTreeValue(this.selectedRepoId))
     this.refreshStatusPanel()
     this.refreshDiffPanel()
     this.refreshLogsPanel()
@@ -381,7 +386,7 @@ export class PiConductorApp {
       this.workspaceOptions.findIndex((it) => Number(it.value) === this.selectedWorkspaceId),
     )
     if (workspace) {
-      this.rebuildWorkspaceTreeOptions(`${TREE_WORKSPACE_PREFIX}${workspace.repoId}:${workspace.id}`)
+      this.rebuildWorkspaceTreeOptions(workspaceTreeValue(workspace.repoId, workspace.id))
     } else {
       this.rebuildWorkspaceTreeOptions()
     }
@@ -1049,12 +1054,12 @@ export class PiConductorApp {
     if (this.selectedWorkspaceId) {
       const selectedWorkspace = this.store.getWorkspaceById(this.selectedWorkspaceId)
       if (selectedWorkspace) {
-        return `${TREE_WORKSPACE_PREFIX}${selectedWorkspace.repoId}:${selectedWorkspace.id}`
+        return workspaceTreeValue(selectedWorkspace.repoId, selectedWorkspace.id)
       }
     }
 
     if (this.selectedRepoId) {
-      return `${TREE_REPO_PREFIX}${this.selectedRepoId}`
+      return repoTreeValue(this.selectedRepoId)
     }
 
     return null
@@ -1101,9 +1106,14 @@ export class PiConductorApp {
       const expanded = this.expandedRepoIds.has(repo.id)
 
       treeOptions.push({
-        name: `${expanded ? "▾" : "▸"} ${repo.id} - ${repo.name}`,
+        name: formatWorkspaceTreeRowName({
+          isRepo: true,
+          expanded,
+          repoId: repo.id,
+          repoName: repo.name,
+        }),
         description: `${repoWorkspaces.length} workspace${repoWorkspaces.length === 1 ? "" : "s"} · ${repo.rootPath}`,
-        value: `${TREE_REPO_PREFIX}${repo.id}`,
+        value: repoTreeValue(repo.id),
       })
 
       if (!expanded) {
@@ -1113,9 +1123,16 @@ export class PiConductorApp {
       for (const workspace of repoWorkspaces) {
         const { added, removed } = this.getWorkspaceDiffTotals(workspace.worktreePath)
         treeOptions.push({
-          name: `  > ${workspace.name} · ${workspace.branch} [+${added} -${removed}]`,
+          name: formatWorkspaceTreeRowName({
+            isRepo: false,
+            repoId: repo.id,
+            workspaceName: workspace.name,
+            branch: workspace.branch,
+            added,
+            removed,
+          }),
           description: workspace.worktreePath,
-          value: `${TREE_WORKSPACE_PREFIX}${repo.id}:${workspace.id}`,
+          value: workspaceTreeValue(repo.id, workspace.id),
         })
       }
     }
@@ -1123,7 +1140,7 @@ export class PiConductorApp {
     this.workspaceTreeOptions = treeOptions
 
     const selectedWorkspaceValue = this.workspaceTreeValueForSelection()
-    const selectedRepoValue = this.selectedRepoId ? `${TREE_REPO_PREFIX}${this.selectedRepoId}` : null
+    const selectedRepoValue = this.selectedRepoId ? repoTreeValue(this.selectedRepoId) : null
     const targetValue = preferredValue ?? selectedWorkspaceValue ?? selectedRepoValue
 
     let selectedIndex = targetValue ? treeOptions.findIndex((option) => String(option.value) === targetValue) : -1
@@ -1135,33 +1152,8 @@ export class PiConductorApp {
     this.workspaceTreeSelectedIndex = Math.max(0, selectedIndex)
   }
 
-  private parseWorkspaceTreeOption(option: SelectOption):
-    | { type: "repo"; repoId: number }
-    | { type: "workspace"; repoId: number; workspaceId: number }
-    | null {
-    const raw = String(option.value ?? "")
-
-    if (raw.startsWith(TREE_WORKSPACE_PREFIX)) {
-      const parts = raw.slice(TREE_WORKSPACE_PREFIX.length).split(":")
-      const repoId = Number(parts[0])
-      const workspaceId = Number(parts[1])
-
-      if (Number.isInteger(repoId) && Number.isInteger(workspaceId)) {
-        return { type: "workspace", repoId, workspaceId }
-      }
-
-      return null
-    }
-
-    if (raw.startsWith(TREE_REPO_PREFIX)) {
-      const repoId = Number(raw.slice(TREE_REPO_PREFIX.length))
-      if (Number.isInteger(repoId)) {
-        return { type: "repo", repoId }
-      }
-      return null
-    }
-
-    return null
+  private parseWorkspaceTreeOption(option: SelectOption) {
+    return parseWorkspaceTreeValue(option.value)
   }
 
   private reloadRepos(preferredRepoId?: number | null) {
@@ -1265,7 +1257,7 @@ export class PiConductorApp {
 
       this.reloadRepos(parsed.repoId)
       this.reloadWorkspaces()
-      this.rebuildWorkspaceTreeOptions(`${TREE_REPO_PREFIX}${parsed.repoId}`)
+      this.rebuildWorkspaceTreeOptions(repoTreeValue(parsed.repoId))
     } else {
       this.selectedRepoId = parsed.repoId
       this.expandedRepoIds.add(parsed.repoId)
@@ -1276,7 +1268,7 @@ export class PiConductorApp {
         0,
         this.workspaceOptions.findIndex((it) => Number(it.value) === parsed.workspaceId),
       )
-      this.rebuildWorkspaceTreeOptions(`${TREE_WORKSPACE_PREFIX}${parsed.repoId}:${parsed.workspaceId}`)
+      this.rebuildWorkspaceTreeOptions(workspaceTreeValue(parsed.repoId, parsed.workspaceId))
     }
 
     this.refreshStatusPanel()

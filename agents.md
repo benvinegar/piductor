@@ -142,9 +142,10 @@ If you add/rename commands, update:
 ## Safety checks before finishing
 
 1. `npx tsc --noEmit` passes
-2. App still starts with `bun run dev`
-3. README and help text match behavior changes
-4. If deps change, keep lockfiles in sync (`bun.lock` and `package-lock.json`)
+2. `npm test` passes
+3. App still starts with `bun run dev`
+4. README and help text match behavior changes
+5. If deps change, keep lockfiles in sync (`bun.lock` and `package-lock.json`)
 
 ## Style preferences
 
