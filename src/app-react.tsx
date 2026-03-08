@@ -1288,6 +1288,9 @@ export class PiConductorApp {
       case "message_end":
         this.flushThinkingPartial(workspaceId)
         this.flushAssistantPartial(workspaceId)
+        if (event?.message?.role === "assistant") {
+          this.appendWorkspaceLog(workspaceId, "[assistant-break]")
+        }
         break
 
       case "turn_end":
@@ -1771,6 +1774,11 @@ export class PiConductorApp {
       if (line.startsWith("[extension-ui]")) {
         flushAssistant()
         rendered.push(`> ℹ️ Agent requested extension UI input.`)
+        continue
+      }
+
+      if (line.startsWith("[assistant-break]")) {
+        flushAssistant()
         continue
       }
 
