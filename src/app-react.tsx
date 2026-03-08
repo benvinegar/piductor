@@ -2177,6 +2177,9 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                       const value = String(option.value ?? "")
                       const isRepoRow = value.startsWith(TREE_REPO_PREFIX)
                       const workspaceDiff = !isRepoRow ? String(option.description ?? "") : ""
+                      const diffMatch = workspaceDiff.match(/^(\+\S+)\s+(-\S+)$/)
+                      const plusText = diffMatch?.[1] ?? "+0"
+                      const minusText = diffMatch?.[2] ?? "-0"
                       const marker = isRepoRow ? " " : selected ? "●" : "○"
 
                       return (
@@ -2199,6 +2202,34 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                             marginBottom: isRepoRow ? 0 : 1,
                           }}
                         >
+                          {!isRepoRow && (
+                            <text
+                              id={`pc-workspace-tree-row-plus-${index}`}
+                              content={plusText}
+                              fg="#86efac"
+                              wrapMode="none"
+                              selectable={false}
+                              style={{
+                                flexShrink: 0,
+                                marginRight: 1,
+                              }}
+                            />
+                          )}
+
+                          {!isRepoRow && (
+                            <text
+                              id={`pc-workspace-tree-row-minus-${index}`}
+                              content={minusText}
+                              fg="#fca5a5"
+                              wrapMode="none"
+                              selectable={false}
+                              style={{
+                                flexShrink: 0,
+                                marginRight: 1,
+                              }}
+                            />
+                          )}
+
                           <text
                             id={`pc-workspace-tree-row-text-${index}`}
                             content={option.name}
@@ -2209,20 +2240,6 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                               flexShrink: 1,
                             }}
                           />
-
-                          {!isRepoRow && (
-                            <text
-                              id={`pc-workspace-tree-row-diff-${index}`}
-                              content={workspaceDiff}
-                              fg="#94a3b8"
-                              wrapMode="none"
-                              selectable={false}
-                              style={{
-                                flexShrink: 0,
-                                marginLeft: 1,
-                              }}
-                            />
-                          )}
 
                           <text
                             id={`pc-workspace-tree-row-marker-${index}`}
