@@ -46,7 +46,7 @@ export function formatAssistantMessageRail(content: string): string {
       continue
     }
 
-    quoted.push(`> ${line}  `)
+    quoted.push(`> ${line}`)
   }
 
   return quoted.join("\n")
