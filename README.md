@@ -57,6 +57,7 @@ bun run dev
 /agent start [model]
 /agent stop
 /mode <prompt|steer|follow_up>
+/pr create [--dry-run]
 /run [command]
 /run stop
 /status
@@ -65,6 +66,8 @@ bun run dev
 ```
 
 Plain text input sends a message to the selected workspace agent using the current mode.
+
+`/pr create` requires GitHub CLI auth (`gh auth login`).
 
 ## Keyboard + mouse controls
 

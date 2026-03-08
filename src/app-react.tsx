@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs"
 import os from "node:os"
 import path from "node:path"
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process"
+import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process"
 import {
   createCliRenderer,
   parseColor,
@@ -34,6 +34,7 @@ import {
   workspaceTreeValue,
 } from "./workspace-tree"
 import { parseWorkspaceNewArgs, workspaceNewUsage } from "./workspace-new"
+import { extractFirstUrl, parsePrCreateArgs, prCreateUsage } from "./pr-command"
 
 const GLOBAL_LOG_STREAM_ID = 0
 
@@ -440,6 +441,7 @@ export class PiConductorApp {
         this.appendGlobalLog("  /agent start [model]")
         this.appendGlobalLog("  /agent stop")
         this.appendGlobalLog("  /mode <prompt|steer|follow_up>")
+        this.appendGlobalLog("  /pr create [--dry-run]")
         this.appendGlobalLog("  /run [command]  (or config scripts.run)")
         this.appendGlobalLog("  /run stop")
         this.appendGlobalLog("  /status")
@@ -736,6 +738,70 @@ export class PiConductorApp {
         return
       }
 
+      case "pr": {
+        const sub = (args[0] || "").toLowerCase()
+        if (sub !== "create") {
+          this.appendGlobalLog(prCreateUsage())
+          return
+        }
+
+        const parsed = parsePrCreateArgs(args.slice(1))
+        if (!parsed) {
+          this.appendGlobalLog(prCreateUsage())
+          return
+        }
+
+        const workspace = this.getSelectedWorkspace()
+        if (!workspace) {
+          this.appendGlobalLog("No workspace selected.")
+          return
+        }
+
+        const auth = this.runCommand("gh", ["auth", "status"], workspace.worktreePath)
+        if (auth.status !== 0) {
+          this.appendWorkspaceLog(workspace.id, "GitHub auth unavailable. Run `gh auth login` first.")
+          if (auth.stderr) this.appendWorkspaceLog(workspace.id, auth.stderr)
+          return
+        }
+
+        if (parsed.dryRun) {
+          this.appendWorkspaceLog(workspace.id, `[pr] dry run: would push branch ${workspace.branch}`)
+          this.appendWorkspaceLog(workspace.id, `[pr] dry run: gh pr create --fill --head ${workspace.branch}`)
+          return
+        }
+
+        this.appendWorkspaceLog(workspace.id, `[pr] pushing branch ${workspace.branch} ...`)
+        const push = this.runCommand("git", ["push", "-u", "origin", workspace.branch], workspace.worktreePath)
+        if (push.status !== 0) {
+          const detail = [push.stderr, push.stdout].filter(Boolean).join("\n") || "git push failed"
+          this.appendWorkspaceLog(workspace.id, `[pr] push failed:\n${detail}`)
+          return
+        }
+
+        this.appendWorkspaceLog(workspace.id, "[pr] creating pull request via gh ...")
+        const create = this.runCommand("gh", ["pr", "create", "--fill", "--head", workspace.branch], workspace.worktreePath)
+        const output = [create.stdout, create.stderr].filter(Boolean).join("\n")
+        const prUrl = extractFirstUrl(output)
+
+        if (create.status !== 0) {
+          if (prUrl) {
+            this.appendWorkspaceLog(workspace.id, `[pr] pull request already exists: ${prUrl}`)
+          } else {
+            this.appendWorkspaceLog(workspace.id, `[pr] create failed:\n${output || "unknown error"}`)
+          }
+          return
+        }
+
+        if (prUrl) {
+          this.appendWorkspaceLog(workspace.id, `[pr] created: ${prUrl}`)
+          this.appendGlobalLog(`PR created for ${workspace.name}: ${prUrl}`)
+        } else {
+          this.appendWorkspaceLog(workspace.id, `[pr] created. Output:\n${output || "(no output)"}`)
+          this.appendGlobalLog(`PR created for ${workspace.name}.`)
+        }
+        return
+      }
+
       case "mode": {
         const nextMode = args[0] as SendMode | undefined
         if (!nextMode || !["prompt", "steer", "follow_up"].includes(nextMode)) {
@@ -813,6 +879,20 @@ export class PiConductorApp {
 
       default:
         this.appendGlobalLog(`Unknown command: /${command}`)
+    }
+  }
+
+  private runCommand(command: string, args: string[], cwd: string) {
+    const result = spawnSync(command, args, {
+      cwd,
+      env: process.env,
+      encoding: "utf8",
+    })
+
+    return {
+      status: result.status ?? -1,
+      stdout: String(result.stdout ?? "").trim(),
+      stderr: String(result.stderr ?? "").trim(),
     }
   }
 
