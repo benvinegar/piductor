@@ -2385,7 +2385,6 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
               marginBottom: 1,
               paddingLeft: 1,
               paddingRight: 1,
-              paddingTop: 1,
             }}
           >
             <box
