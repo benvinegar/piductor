@@ -79,6 +79,12 @@ function formatSectionHeader(title: string, collapsed: boolean, width: number): 
   return `${prefix}${"─".repeat(filler)}`
 }
 
+function formatLineHeader(title: string, width: number): string {
+  const prefix = `${title} `
+  const filler = Math.max(0, width - prefix.length)
+  return `${prefix}${"─".repeat(filler)}`
+}
+
 function formatUserMessageBox(content: string): string {
   const rawLines = content.split(/\r?\n/).map((line) => line.trimEnd())
   const lines = rawLines.length > 0 ? rawLines : [""]
@@ -1683,9 +1689,7 @@ export class PiConductorApp {
     ]
 
     this.statusText = statusLines.join("\n")
-    this.conversationTabsText = workspace
-      ? ` All changes · ${workspace.name} · ${workspace.branch}`
-      : " All changes · Review branch changes · Debugging"
+    this.conversationTabsText = workspace ? `${workspace.name} • ${workspace.branch}` : "No workspace selected"
     this.footerText = `repos=${this.repos.length} workspaces=${this.workspaces.length} · data=${this.config.dataDir} · pi=${this.config.piCommand}`
   }
 
@@ -1891,6 +1895,12 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
   const statusSectionHeader = formatSectionHeader("Workspace Status", statusSectionCollapsed, rightSectionHeaderWidth)
   const changesSectionHeader = formatSectionHeader("Changes", changesSectionCollapsed, rightSectionHeaderWidth)
   const terminalSectionHeader = formatSectionHeader("Run Terminal", terminalSectionCollapsed, rightSectionHeaderWidth)
+
+  const centerColumnWidth = Math.max(
+    24,
+    terminalWidth - (leftVisible ? leftColumnWidth + 1 : 0) - (rightVisible ? rightColumnWidth + 1 : 0),
+  )
+  const conversationHeaderText = formatLineHeader(snapshot.conversationTabsText, Math.max(12, centerColumnWidth - 2))
 
   const hasLoadingToken = snapshot.agentBusy
   useEffect(() => {
@@ -2378,15 +2388,25 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
               paddingTop: 1,
             }}
           >
-            <text
-              id="pc-conversation-tabs"
-              content={snapshot.conversationTabsText}
-              fg="#9ca3af"
+            <box
+              id="pc-conversation-header"
+              height={1}
+              backgroundColor="#182031"
               style={{
                 flexShrink: 0,
+                flexDirection: "row",
+                alignItems: "center",
                 marginBottom: 1,
               }}
-            />
+            >
+              <text
+                id="pc-conversation-tabs"
+                content={conversationHeaderText}
+                fg="#bfdbfe"
+                wrapMode="none"
+                selectable={false}
+              />
+            </box>
 
             <scrollbox
               id="pc-conversation-scroll"
