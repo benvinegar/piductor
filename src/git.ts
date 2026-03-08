@@ -50,6 +50,48 @@ function branchExists(repoRoot: string, branch: string): boolean {
   return result.status === 0
 }
 
+function commitRefExists(repoRoot: string, ref: string): boolean {
+  const result = runAllowError("git", ["-C", repoRoot, "rev-parse", "--verify", "--quiet", `${ref}^{commit}`])
+  return result.status === 0
+}
+
+export function resolveWorkspaceBaseRef(repoRoot: string, requestedRef: string): string | null {
+  const ref = requestedRef.trim()
+  if (!ref) return null
+
+  const candidates = [
+    ref,
+    `refs/heads/${ref}`,
+    `refs/remotes/origin/${ref}`,
+    ref.startsWith("origin/") ? `refs/remotes/${ref}` : "",
+  ].filter(Boolean)
+
+  for (const candidate of candidates) {
+    if (commitRefExists(repoRoot, candidate)) {
+      return candidate
+    }
+  }
+
+  return null
+}
+
+export function listBranchRefs(repoRoot: string): string[] {
+  const localResult = runAllowError("git", ["-C", repoRoot, "for-each-ref", "--format=%(refname:short)", "refs/heads"])
+  const remoteResult = runAllowError("git", ["-C", repoRoot, "for-each-ref", "--format=%(refname:short)", "refs/remotes/origin"])
+
+  const local = (localResult.stdout ?? "")
+    .split(/\r?\n/)
+    .map((it) => it.trim())
+    .filter(Boolean)
+
+  const remote = (remoteResult.stdout ?? "")
+    .split(/\r?\n/)
+    .map((it) => it.trim())
+    .filter((it) => it && it !== "origin/HEAD")
+
+  return [...new Set([...local, ...remote])]
+}
+
 function findUniqueBranch(repoRoot: string, branchBase: string): string {
   if (!branchExists(repoRoot, branchBase)) return branchBase
 

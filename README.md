@@ -11,7 +11,7 @@ Built with:
 ## What it does
 
 - Register repos (local path or remote git URL)
-- Create isolated workspaces via `git worktree`
+- Create isolated workspaces via `git worktree` (from `HEAD`, a base ref, or an existing branch)
 - Start one Pi RPC agent per workspace
 - Send agent messages in `prompt`, `steer`, or `follow_up` mode
 - Stream assistant output into a chat-style markdown transcript
@@ -47,6 +47,8 @@ bun run dev
 /repo add <local-path|git-url> [name]
 /repo select <id|name>
 /workspace new <name> [baseRef]
+/workspace new --branch <branch> [name]
+/workspace branches
 /workspace select <id|name>
 /workspace archive
 /agent start [model]

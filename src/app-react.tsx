@@ -20,8 +20,9 @@ import {
   ensureRepoFromLocalPath,
   getChangedFiles,
   getChangedFileStats,
+  listBranchRefs,
   removeWorktree,
-  slugify,
+  resolveWorkspaceBaseRef,
 } from "./git"
 import {
   formatWorkspaceTreeRowName,
@@ -30,6 +31,7 @@ import {
   TREE_REPO_PREFIX,
   workspaceTreeValue,
 } from "./workspace-tree"
+import { parseWorkspaceNewArgs, workspaceNewUsage } from "./workspace-new"
 
 const GLOBAL_LOG_STREAM_ID = 0
 
@@ -427,6 +429,8 @@ export class PiConductorApp {
         this.appendGlobalLog("  /repo add <local-path|git-url> [name]")
         this.appendGlobalLog("  /repo select <id|name>")
         this.appendGlobalLog("  /workspace new <name> [baseRef]")
+        this.appendGlobalLog("  /workspace new --branch <branch> [name]")
+        this.appendGlobalLog("  /workspace branches")
         this.appendGlobalLog("  /workspace archive")
         this.appendGlobalLog("  /workspace select <id|name>")
         this.appendGlobalLog("  /agent start [model]")
@@ -514,34 +518,76 @@ export class PiConductorApp {
             return
           }
 
-          const requestedName = args[1]
-          if (!requestedName) {
-            this.appendGlobalLog("Usage: /workspace new <name> [baseRef]")
+          const parsed = parseWorkspaceNewArgs(args.slice(1))
+          if (!parsed) {
+            this.appendGlobalLog(workspaceNewUsage())
             return
           }
 
-          const baseRef = args[2] || "HEAD"
-          const workspaceName = slugify(requestedName)
+          let baseRef = parsed.baseRef
+          if (parsed.fromBranch) {
+            const resolved = resolveWorkspaceBaseRef(repo.rootPath, parsed.baseRef)
+            if (!resolved) {
+              this.appendGlobalLog(`Branch not found: ${parsed.baseRef}`)
+              this.appendGlobalLog("Use /workspace branches to list available branches.")
+              return
+            }
+            baseRef = resolved
+          }
 
           const created = createWorktree({
             repoRoot: repo.rootPath,
             workspacesDir: this.config.workspacesDir,
-            workspaceName,
+            workspaceName: parsed.workspaceName,
             baseRef,
           })
 
-          const workspace = this.store.createWorkspace(this.selectedRepoId, workspaceName, created.branch, created.worktreePath)
+          const workspace = this.store.createWorkspace(
+            this.selectedRepoId,
+            parsed.workspaceName,
+            created.branch,
+            created.worktreePath,
+          )
           this.selectedWorkspaceId = workspace.id
           this.reloadWorkspaces(workspace.id)
 
           this.appendWorkspaceLog(
             workspace.id,
-            `Workspace created at ${workspace.worktreePath} on branch ${workspace.branch}`,
+            `Workspace created at ${workspace.worktreePath} on branch ${workspace.branch} (base ${baseRef})`,
           )
 
           if (this.config.scripts.setup) {
             this.appendWorkspaceLog(workspace.id, `Running setup script: ${this.config.scripts.setup}`)
             void this.startRunProcess(workspace.id, this.config.scripts.setup, "setup", true)
+          }
+
+          return
+        }
+
+        if (sub === "branches") {
+          if (!this.selectedRepoId) {
+            this.appendGlobalLog("No repo selected. Add/select a repo first.")
+            return
+          }
+
+          const repo = this.store.getRepoById(this.selectedRepoId)
+          if (!repo) {
+            this.appendGlobalLog("Selected repo no longer exists.")
+            return
+          }
+
+          const refs = listBranchRefs(repo.rootPath)
+          if (refs.length === 0) {
+            this.appendGlobalLog("No branches found.")
+            return
+          }
+
+          this.appendGlobalLog(`Branches for ${repo.name}:`)
+          for (const ref of refs.slice(0, 30)) {
+            this.appendGlobalLog(`  ${ref}`)
+          }
+          if (refs.length > 30) {
+            this.appendGlobalLog(`  ... (${refs.length - 30} more)`)
           }
 
           return
@@ -601,7 +647,7 @@ export class PiConductorApp {
           return
         }
 
-        this.appendGlobalLog("Usage: /workspace new|archive|select ...")
+        this.appendGlobalLog("Usage: /workspace new|branches|archive|select ...")
         return
       }
 
