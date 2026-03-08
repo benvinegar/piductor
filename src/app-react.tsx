@@ -1691,7 +1691,7 @@ export class PiConductorApp {
 
     this.statusText = statusLines.join("\n")
     this.conversationTabsText = workspace ? workspace.branch : "No workspace selected"
-    this.footerText = `Piductor ${APP_VERSION} · repos=${this.repos.length} workspaces=${this.workspaces.length} · data=${this.config.dataDir} · pi=${this.config.piCommand}`
+    this.footerText = `repos=${this.repos.length} workspaces=${this.workspaces.length} · data=${this.config.dataDir} · pi=${this.config.piCommand}`
   }
 
   private toConversationMarkdown(lines: string[]): string {
@@ -2242,7 +2242,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
 
             <text
               id="pc-workspace-archive-tip"
-              content="Archived workspaces: /workspace archived · restore: /workspace restore <id|name>"
+              content={`Piductor ${APP_VERSION} · /workspace archived · /workspace restore <id|name>`}
               fg="#64748b"
               wrapMode="none"
               style={{
