@@ -69,7 +69,13 @@ export function toConversationMarkdown(lines: string[]): string {
   const recent = lines.slice(-300)
   for (const rawLine of recent) {
     const line = stripTimestamp(rawLine)
-    if (!line.trim()) continue
+
+    if (line.length === 0) {
+      if (pendingAssistant.length > 0) {
+        pendingAssistant.push("")
+      }
+      continue
+    }
 
     if (line.startsWith("[you/")) {
       flushAssistant()

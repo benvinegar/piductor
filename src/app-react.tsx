@@ -1308,10 +1308,8 @@ export class PiConductorApp {
     const parts = combined.split(/\r?\n/)
 
     for (let i = 0; i < parts.length - 1; i++) {
-      const line = parts[i]
-      if (line.length > 0) {
-        this.appendWorkspaceLog(workspaceId, line)
-      }
+      const line = parts[i] ?? ""
+      this.appendWorkspaceLog(workspaceId, line)
     }
 
     const remainder = parts[parts.length - 1] ?? ""

@@ -45,6 +45,18 @@ describe("conversation-render", () => {
     expect(rendered).toContain("...")
   })
 
+  it("preserves blank lines inside assistant messages", () => {
+    const rendered = toConversationMarkdown([
+      "[12:00:01] Line one",
+      "[12:00:02] ",
+      "[12:00:03] Line three",
+    ])
+
+    expect(rendered).toContain("> Line one")
+    expect(rendered).toContain("\n>\n")
+    expect(rendered).toContain("> Line three")
+  })
+
   it("suppresses tool chatter lines", () => {
     const rendered = toConversationMarkdown([
       "[12:00:00] [tool] bash start",
