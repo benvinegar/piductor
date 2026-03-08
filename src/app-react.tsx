@@ -8,9 +8,10 @@ import {
   type CliRenderer,
   type KeyEvent,
   type SelectOption,
+  type SelectRenderable,
 } from "@opentui/core"
 import { createRoot, useKeyboard, useTerminalDimensions, type Root } from "@opentui/react"
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react"
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
 import { Store } from "./db"
 import { PiRpcProcess } from "./pi-rpc"
 import type { AppConfig, RepoRecord, SendMode, WorkspaceRecord } from "./types"
@@ -342,6 +343,10 @@ export class PiConductorApp {
   public selectRepoOption(option: SelectOption | null) {
     if (!option) return
     this.selectedRepoId = Number(option.value)
+    this.repoSelectedIndex = Math.max(
+      0,
+      this.repoOptions.findIndex((it) => Number(it.value) === this.selectedRepoId),
+    )
     this.reloadWorkspaces()
     this.refreshStatusPanel()
     this.refreshDiffPanel()
@@ -353,6 +358,10 @@ export class PiConductorApp {
   public selectWorkspaceOption(option: SelectOption | null) {
     if (!option) return
     this.selectedWorkspaceId = Number(option.value)
+    this.workspaceSelectedIndex = Math.max(
+      0,
+      this.workspaceOptions.findIndex((it) => Number(it.value) === this.selectedWorkspaceId),
+    )
     this.refreshStatusPanel()
     this.refreshDiffPanel()
     this.refreshLogsPanel()
@@ -1329,6 +1338,38 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
   const [changesSectionCollapsed, setChangesSectionCollapsed] = useState(false)
   const [terminalSectionCollapsed, setTerminalSectionCollapsed] = useState(false)
 
+  const repoSelectRef = useRef<SelectRenderable | null>(null)
+  const workspaceSelectRef = useRef<SelectRenderable | null>(null)
+
+  const selectOptionByMouse = (
+    event: { y: number; preventDefault: () => void },
+    selectRef: SelectRenderable | null,
+    options: SelectOption[],
+    onPick: (option: SelectOption) => void,
+  ) => {
+    if (!selectRef || options.length === 0) {
+      return
+    }
+
+    const relativeY = event.y - selectRef.y
+    if (relativeY < 0 || relativeY >= selectRef.height) {
+      return
+    }
+
+    const linesPerItem = 2
+    const row = Math.floor(relativeY / linesPerItem)
+    const scrollOffset = Number((selectRef as any).scrollOffset ?? 0)
+    const index = scrollOffset + row
+    const option = options[index]
+    if (!option) {
+      return
+    }
+
+    event.preventDefault()
+    ;(selectRef as any).setSelectedIndex?.(index)
+    onPick(option)
+  }
+
   const conversationSyntaxStyle = useMemo(
     () =>
       SyntaxStyle.fromStyles({
@@ -1688,6 +1729,9 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                 >
                   <select
                     id="pc-repo-select"
+                    ref={(renderable) => {
+                      repoSelectRef.current = renderable
+                    }}
                     focused={focusTarget === "repo"}
                     options={snapshot.repoOptions}
                     selectedIndex={snapshot.repoSelectedIndex}
@@ -1700,6 +1744,13 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                     descriptionColor="#64748b"
                     selectedDescriptionColor="#93c5fd"
                     showScrollIndicator
+                    onMouseDown={(event) => {
+                      setRepoSectionCollapsed(false)
+                      setFocusTarget("repo")
+                      selectOptionByMouse(event, repoSelectRef.current, snapshot.repoOptions, (option) => {
+                        app.selectRepoOption(option)
+                      })
+                    }}
                     onChange={(_, option) => {
                       app.selectRepoOption(option)
                     }}
@@ -1750,6 +1801,9 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                 >
                   <select
                     id="pc-workspace-select"
+                    ref={(renderable) => {
+                      workspaceSelectRef.current = renderable
+                    }}
                     focused={focusTarget === "workspace"}
                     options={snapshot.workspaceOptions}
                     selectedIndex={snapshot.workspaceSelectedIndex}
@@ -1762,6 +1816,13 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                     descriptionColor="#64748b"
                     selectedDescriptionColor="#a7f3d0"
                     showScrollIndicator
+                    onMouseDown={(event) => {
+                      setWorkspaceSectionCollapsed(false)
+                      setFocusTarget("workspace")
+                      selectOptionByMouse(event, workspaceSelectRef.current, snapshot.workspaceOptions, (option) => {
+                        app.selectWorkspaceOption(option)
+                      })
+                    }}
                     onChange={(_, option) => {
                       app.selectWorkspaceOption(option)
                     }}
