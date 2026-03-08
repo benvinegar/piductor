@@ -1729,13 +1729,11 @@ export class PiConductorApp {
       }
 
       if (line.startsWith("[tool]")) {
-        flushAssistant()
-        const content = line.replace(/^\[tool\]\s*/, "")
-        rendered.push(`- ⚙️ ${content}`)
         continue
       }
 
       if (line.startsWith("[agent]")) {
+        flushAssistant()
         continue
       }
 
@@ -1770,7 +1768,7 @@ export class PiConductorApp {
 
     flushAssistant()
 
-    return rendered.join("\n\n\n") || DEFAULT_CONVERSATION
+    return rendered.join("\n\n") || DEFAULT_CONVERSATION
   }
 
   private refreshLogsPanel() {
