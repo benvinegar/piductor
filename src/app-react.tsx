@@ -218,7 +218,8 @@ export class PiConductorApp {
 
   private selectedRepoId: number | null = null
   private selectedWorkspaceId: number | null = null
-  private sendMode: SendMode = "prompt"
+  private defaultSendMode: SendMode = "prompt"
+  private readonly sendModeByWorkspace = new Map<number, SendMode>()
 
   private readonly agentByWorkspace = new Map<number, PiRpcProcess>()
   private readonly logsByStream = new Map<number, string[]>()
@@ -255,7 +256,7 @@ export class PiConductorApp {
     workspaceTreeSelectedIndex: 0,
     selectedRepoId: null,
     selectedWorkspaceId: null,
-    sendMode: "prompt",
+    sendMode: this.defaultSendMode,
     leftSidebarCollapsed: false,
     rightSidebarCollapsed: false,
     agentBusy: false,
@@ -331,7 +332,7 @@ export class PiConductorApp {
       workspaceTreeSelectedIndex: this.workspaceTreeSelectedIndex,
       selectedRepoId: this.selectedRepoId,
       selectedWorkspaceId: this.selectedWorkspaceId,
-      sendMode: this.sendMode,
+      sendMode: this.getActiveSendMode(),
       leftSidebarCollapsed: this.leftSidebarCollapsed,
       rightSidebarCollapsed: this.rightSidebarCollapsed,
       agentBusy: this.agentBusy,
@@ -849,8 +850,14 @@ export class PiConductorApp {
           return
         }
 
-        this.sendMode = nextMode
-        this.appendGlobalLog(`Send mode set to ${nextMode}`)
+        this.setSendModeForCurrentSelection(nextMode)
+
+        const workspace = this.getSelectedWorkspace()
+        if (workspace) {
+          this.appendGlobalLog(`Send mode for ${workspace.name} set to ${nextMode}`)
+        } else {
+          this.appendGlobalLog(`Default send mode set to ${nextMode}`)
+        }
         return
       }
 
@@ -982,14 +989,15 @@ export class PiConductorApp {
       return
     }
 
+    const sendMode = this.getSendModeForWorkspace(workspace.id)
     let agent = this.agentByWorkspace.get(workspace.id)
 
-    if (!agent && this.sendMode !== "prompt") {
+    if (!agent && sendMode !== "prompt") {
       this.appendWorkspaceLog(workspace.id, "Agent is not running. Use /agent start")
       return
     }
 
-    this.appendWorkspaceLog(workspace.id, `[you/${this.sendMode}] ${message}`)
+    this.appendWorkspaceLog(workspace.id, `[you/${sendMode}] ${message}`)
 
     if (!agent) {
       await this.startAgent(workspace.id, this.config.defaultModel)
@@ -1004,9 +1012,9 @@ export class PiConductorApp {
     this.emitSnapshot()
 
     try {
-      if (this.sendMode === "prompt") {
+      if (sendMode === "prompt") {
         await agent.prompt(message)
-      } else if (this.sendMode === "steer") {
+      } else if (sendMode === "steer") {
         await agent.steer(message)
       } else {
         await agent.followUp(message)
@@ -1614,6 +1622,27 @@ export class PiConductorApp {
     return workspace
   }
 
+  private getSendModeForWorkspace(workspaceId: number | null): SendMode {
+    if (!workspaceId) {
+      return this.defaultSendMode
+    }
+
+    return this.sendModeByWorkspace.get(workspaceId) ?? this.defaultSendMode
+  }
+
+  private getActiveSendMode(): SendMode {
+    return this.getSendModeForWorkspace(this.selectedWorkspaceId)
+  }
+
+  private setSendModeForCurrentSelection(mode: SendMode) {
+    if (!this.selectedWorkspaceId) {
+      this.defaultSendMode = mode
+      return
+    }
+
+    this.sendModeByWorkspace.set(this.selectedWorkspaceId, mode)
+  }
+
   private appendGlobalLog(message: string) {
     this.appendLog(GLOBAL_LOG_STREAM_ID, message)
   }
@@ -1676,9 +1705,11 @@ export class PiConductorApp {
     const agentStatusLabel = turnInFlight ? "running" : agentStatus
     this.agentBusy = shouldShowAgentSpinner
 
+    const activeSendMode = this.getActiveSendMode()
+
     this.headerText = workspace
-      ? `${repo?.name ?? "repo"}/${workspace.name} · ${workspace.branch} · mode=${this.sendMode} · ${mergeState}`
-      : `Piductor · select a repo/workspace · mode=${this.sendMode}`
+      ? `${repo?.name ?? "repo"}/${workspace.name} · ${workspace.branch} · mode=${activeSendMode} · ${mergeState}`
+      : `Piductor · select a repo/workspace · mode=${activeSendMode}`
 
     const statusLines = [
       `repo       ${repo ? `${repo.name} (#${repo.id})` : "<none>"}`,
@@ -1777,6 +1808,9 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
   const snapshot = useSyncExternalStore(app.subscribe, app.getSnapshot, app.getSnapshot)
   const { width: terminalWidth } = useTerminalDimensions()
   const composerRef = useRef<TextareaRenderable | null>(null)
+  const previousWorkspaceIdRef = useRef<number | null>(null)
+  const draftByWorkspaceRef = useRef(new Map<number, string>())
+  const globalDraftRef = useRef("")
   const [focusTarget, setFocusTarget] = useState<FocusTarget>("input")
   const [leftColumnWidth, setLeftColumnWidth] = useState(36)
   const [rightColumnWidth, setRightColumnWidth] = useState(52)
@@ -1892,6 +1926,34 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
     const parsed = parseWorkspaceTreeValue(option.value)
     setFocusTarget(parsed?.type === "workspace" ? "input" : "workspace")
   }
+
+  useEffect(() => {
+    const composer = composerRef.current
+    if (!composer) {
+      previousWorkspaceIdRef.current = snapshot.selectedWorkspaceId
+      return
+    }
+
+    const previousWorkspaceId = previousWorkspaceIdRef.current
+    const nextWorkspaceId = snapshot.selectedWorkspaceId
+    if (previousWorkspaceId === nextWorkspaceId) {
+      return
+    }
+
+    const currentDraft = composer.plainText ?? ""
+    if (previousWorkspaceId) {
+      draftByWorkspaceRef.current.set(previousWorkspaceId, currentDraft)
+    } else {
+      globalDraftRef.current = currentDraft
+    }
+
+    const nextDraft = nextWorkspaceId
+      ? draftByWorkspaceRef.current.get(nextWorkspaceId) ?? ""
+      : globalDraftRef.current
+
+    composer.setText(nextDraft)
+    previousWorkspaceIdRef.current = nextWorkspaceId
+  }, [snapshot.selectedWorkspaceId])
 
   useEffect(() => {
     if (snapshot.leftSidebarCollapsed && (focusTarget === "repo" || focusTarget === "workspace")) {
@@ -2416,6 +2478,11 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
               placeholder="Ask the selected Pi workspace to do something…"
               onSubmit={() => {
                 const submitted = composerRef.current?.plainText ?? ""
+                if (snapshot.selectedWorkspaceId) {
+                  draftByWorkspaceRef.current.set(snapshot.selectedWorkspaceId, "")
+                } else {
+                  globalDraftRef.current = ""
+                }
                 composerRef.current?.clear()
                 void app.submitInput(submitted)
               }}
