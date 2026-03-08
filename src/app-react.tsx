@@ -1113,9 +1113,9 @@ export class PiConductorApp {
 
       for (const workspace of repoWorkspaces) {
         const { added, removed } = this.getWorkspaceDiffTotals(workspace.worktreePath)
-        const marker = workspace.id === this.selectedWorkspaceId ? "•" : "·"
+        const marker = workspace.id === this.selectedWorkspaceId ? " •" : ""
         treeOptions.push({
-          name: `  > ${workspace.name} ${marker} ${workspace.branch} [+${added} -${removed}]`,
+          name: `  > ${workspace.name} · ${workspace.branch} [+${added} -${removed}]${marker}`,
           description: workspace.worktreePath,
           value: `${TREE_WORKSPACE_PREFIX}${repo.id}:${workspace.id}`,
         })
