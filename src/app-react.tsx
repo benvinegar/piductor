@@ -2240,16 +2240,22 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
               )}
             </box>
 
-            <text
-              id="pc-workspace-archive-tip"
-              content={`Piductor ${APP_VERSION} · /workspace archived · /workspace restore <id|name>`}
-              fg="#64748b"
-              wrapMode="none"
+            <box
+              id="pc-workspace-footer"
               style={{
+                flexDirection: "column",
                 marginTop: 1,
                 flexShrink: 0,
               }}
-            />
+            >
+              <text id="pc-workspace-version" content={`Piductor ${APP_VERSION}`} fg="#94a3b8" wrapMode="none" />
+              <text
+                id="pc-workspace-archive-tip"
+                content="/workspace archived · /workspace restore <id|name>"
+                fg="#64748b"
+                wrapMode="none"
+              />
+            </box>
           </box>
         )}
 
@@ -2709,17 +2715,6 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
         )}
       </box>
 
-      <box
-        id="pc-footer"
-        border={false}
-        height={1}
-        style={{
-          flexShrink: 0,
-          marginTop: 1,
-        }}
-      >
-        <text id="pc-footer-text" content={snapshot.footerText} fg="#94a3b8" wrapMode="none" />
-      </box>
     </box>
   )
 }
