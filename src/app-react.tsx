@@ -87,6 +87,12 @@ function formatLineHeader(title: string, width: number): string {
   return `${prefix}${"─".repeat(filler)}`
 }
 
+type DiffRow = {
+  plus: string
+  minus: string
+  path: string
+}
+
 export interface AppSnapshot {
   repos: RepoRecord[]
   workspaces: WorkspaceRecord[]
@@ -109,6 +115,7 @@ export interface AppSnapshot {
   conversationTabsText: string
   conversationMarkdown: string
   diffFileCount: number
+  diffRows: DiffRow[]
   diffText: string
   terminalText: string
   footerText: string
@@ -237,6 +244,7 @@ export class PiConductorApp {
   private conversationTabsText = " All changes · Review branch changes · Debugging"
   private conversationMarkdown = DEFAULT_CONVERSATION
   private diffFileCount = 0
+  private diffRows: DiffRow[] = []
   private diffText = "No workspace selected."
   private terminalText = "No workspace selected."
   private footerText = ""
@@ -263,6 +271,7 @@ export class PiConductorApp {
     conversationTabsText: this.conversationTabsText,
     conversationMarkdown: this.conversationMarkdown,
     diffFileCount: this.diffFileCount,
+    diffRows: [],
     diffText: this.diffText,
     terminalText: this.terminalText,
     footerText: this.footerText,
@@ -338,6 +347,7 @@ export class PiConductorApp {
       conversationTabsText: this.conversationTabsText,
       conversationMarkdown: this.conversationMarkdown,
       diffFileCount: this.diffFileCount,
+      diffRows: [...this.diffRows],
       diffText: this.diffText,
       terminalText: this.terminalText,
       footerText: this.footerText,
@@ -1715,6 +1725,7 @@ export class PiConductorApp {
     const workspace = this.getSelectedWorkspace()
     if (!workspace) {
       this.diffFileCount = 0
+      this.diffRows = []
       this.diffText = "No workspace selected."
       return
     }
@@ -1724,20 +1735,22 @@ export class PiConductorApp {
       this.diffFileCount = stats.length
 
       if (stats.length === 0) {
+        this.diffRows = []
         this.diffText = "Working tree clean."
         return
       }
 
-      const lines = stats.slice(0, 120).map((entry) => {
-        const plus = entry.added === null ? "+?" : `+${entry.added}`
-        const minus = entry.removed === null ? "-?" : `-${entry.removed}`
-        return `${plus} ${minus} ${entry.path}`
-      })
+      const visible = stats.slice(0, 120)
+      this.diffRows = visible.map((entry) => ({
+        plus: entry.added === null ? "+?" : `+${entry.added}`,
+        minus: entry.removed === null ? "-?" : `-${entry.removed}`,
+        path: entry.path,
+      }))
 
-      const extra = stats.length > lines.length ? `\n... ${stats.length - lines.length} more files` : ""
-      this.diffText = `${lines.join("\n")}${extra}`
+      this.diffText = stats.length > visible.length ? `... ${stats.length - visible.length} more files` : ""
     } catch (error) {
       this.diffFileCount = 0
+      this.diffRows = []
       this.diffText = `Failed to read changes: ${safeErr(error)}`
     }
   }
@@ -2543,16 +2556,108 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
               </box>
 
               {!changesSectionCollapsed && (
-                <text
-                  id="pc-diff-text"
-                  content={snapshot.diffText}
-                  fg="#d1d5db"
-                  wrapMode="none"
+                <box
+                  id="pc-diff-body"
+                  shouldFill
                   style={{
                     flexGrow: 1,
                     marginTop: 1,
                   }}
-                />
+                >
+                  {snapshot.diffRows.length === 0 ? (
+                    <text
+                      id="pc-diff-text"
+                      content={snapshot.diffText}
+                      fg="#d1d5db"
+                      wrapMode="none"
+                      style={{
+                        flexGrow: 1,
+                      }}
+                    />
+                  ) : (
+                    <scrollbox
+                      id="pc-diff-scroll"
+                      border={false}
+                      scrollY
+                      scrollX={false}
+                      shouldFill
+                      style={{
+                        flexGrow: 1,
+                      }}
+                      rootOptions={{
+                        backgroundColor: "transparent",
+                      }}
+                      wrapperOptions={{
+                        backgroundColor: "transparent",
+                      }}
+                      viewportOptions={{
+                        backgroundColor: "transparent",
+                      }}
+                      contentOptions={{
+                        backgroundColor: "transparent",
+                      }}
+                    >
+                      {snapshot.diffRows.map((row, index) => (
+                        <box
+                          key={`${row.path}-${index}`}
+                          id={`pc-diff-row-${index}`}
+                          height={1}
+                          style={{
+                            flexDirection: "row",
+                            alignItems: "center",
+                            flexShrink: 0,
+                          }}
+                        >
+                          <text
+                            id={`pc-diff-plus-${index}`}
+                            content={row.plus}
+                            fg="#86efac"
+                            wrapMode="none"
+                            selectable={false}
+                            style={{
+                              flexShrink: 0,
+                              marginRight: 1,
+                            }}
+                          />
+                          <text
+                            id={`pc-diff-minus-${index}`}
+                            content={row.minus}
+                            fg="#fca5a5"
+                            wrapMode="none"
+                            selectable={false}
+                            style={{
+                              flexShrink: 0,
+                              marginRight: 1,
+                            }}
+                          />
+                          <text
+                            id={`pc-diff-path-${index}`}
+                            content={row.path}
+                            fg="#d1d5db"
+                            wrapMode="none"
+                            style={{
+                              flexGrow: 1,
+                              flexShrink: 1,
+                            }}
+                          />
+                        </box>
+                      ))}
+
+                      {snapshot.diffText ? (
+                        <text
+                          id="pc-diff-extra"
+                          content={snapshot.diffText}
+                          fg="#94a3b8"
+                          wrapMode="none"
+                          style={{
+                            marginTop: 1,
+                            flexShrink: 0,
+                          }}
+                        />
+                      ) : null}
+                    </scrollbox>
+                  )}
+                </box>
               )}
             </box>
 
