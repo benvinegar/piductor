@@ -17,6 +17,7 @@ Built with:
 - Stream assistant output into a chat-style markdown transcript
 - Surface thinking/tool/status events in a readable way
 - Run setup/run/archive scripts per workspace
+- Archive and restore workspaces
 - Show per-file change stats (`+/-`) in a review panel
 - Collapse sidebars, resize side columns with mouse drag, and collapse sidebar sections
 - Navigate a unified workspace tree grouped by repo (`repo -> workspaces`) with expandable repo rows
@@ -51,6 +52,8 @@ bun run dev
 /workspace branches
 /workspace select <id|name>
 /workspace archive
+/workspace archived
+/workspace restore <id|name>
 /agent start [model]
 /agent stop
 /mode <prompt|steer|follow_up>

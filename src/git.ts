@@ -160,6 +160,31 @@ export function createWorktree(params: {
   return { branch, worktreePath: workspacePath }
 }
 
+export function addWorktreeForBranch(params: {
+  repoRoot: string
+  worktreePath: string
+  branch: string
+  baseRef?: string
+}) {
+  mkdirSync(path.dirname(params.worktreePath), { recursive: true })
+
+  if (commitRefExists(params.repoRoot, params.branch)) {
+    run("git", ["-C", params.repoRoot, "worktree", "add", params.worktreePath, params.branch])
+    return
+  }
+
+  const fallbackBase =
+    params.baseRef ??
+    resolveWorkspaceBaseRef(params.repoRoot, params.branch) ??
+    resolveWorkspaceBaseRef(params.repoRoot, `origin/${params.branch}`)
+
+  if (!fallbackBase) {
+    throw new Error(`Branch not found for restore: ${params.branch}`)
+  }
+
+  run("git", ["-C", params.repoRoot, "worktree", "add", "-b", params.branch, params.worktreePath, fallbackBase])
+}
+
 export function removeWorktree(params: { repoRoot: string; worktreePath: string; force?: boolean }) {
   const args = ["-C", params.repoRoot, "worktree", "remove", params.worktreePath]
   if (params.force) args.push("--force")

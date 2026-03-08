@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process"
@@ -15,6 +16,7 @@ import { Store } from "./db"
 import { PiRpcProcess } from "./pi-rpc"
 import type { AppConfig, RepoRecord, SendMode, WorkspaceRecord } from "./types"
 import {
+  addWorktreeForBranch,
   cloneRepo,
   createWorktree,
   ensureRepoFromLocalPath,
@@ -432,6 +434,8 @@ export class PiConductorApp {
         this.appendGlobalLog("  /workspace new --branch <branch> [name]")
         this.appendGlobalLog("  /workspace branches")
         this.appendGlobalLog("  /workspace archive")
+        this.appendGlobalLog("  /workspace archived")
+        this.appendGlobalLog("  /workspace restore <id|name>")
         this.appendGlobalLog("  /workspace select <id|name>")
         this.appendGlobalLog("  /agent start [model]")
         this.appendGlobalLog("  /agent stop")
@@ -615,13 +619,68 @@ export class PiConductorApp {
 
           removeWorktree({ repoRoot: repo.rootPath, worktreePath: workspace.worktreePath, force: true })
           this.store.setWorkspaceArchived(workspace.id, true)
-          this.logsByStream.delete(workspace.id)
-          this.runLogsByWorkspace.delete(workspace.id)
-          this.assistantPartialByWorkspace.delete(workspace.id)
-          this.thinkingPartialByWorkspace.delete(workspace.id)
 
           this.appendGlobalLog(`Archived workspace: ${workspace.name}`)
           this.reloadWorkspaces()
+          return
+        }
+
+        if (sub === "archived") {
+          const archived = this.listArchivedWorkspaces()
+          if (archived.length === 0) {
+            this.appendGlobalLog("No archived workspaces.")
+            return
+          }
+
+          this.appendGlobalLog("Archived workspaces:")
+          for (const workspace of archived.slice(0, 40)) {
+            const repo = this.store.getRepoById(workspace.repoId)
+            const repoLabel = repo ? `${repo.name} (#${repo.id})` : `repo #${workspace.repoId}`
+            this.appendGlobalLog(`  ${workspace.id} · ${workspace.name} · ${workspace.branch} · ${repoLabel}`)
+          }
+          if (archived.length > 40) {
+            this.appendGlobalLog(`  ... (${archived.length - 40} more)`)
+          }
+          this.appendGlobalLog("Use /workspace restore <id|name> to restore one.")
+          return
+        }
+
+        if (sub === "restore") {
+          const needle = args[1]
+          if (!needle) {
+            this.appendGlobalLog("Usage: /workspace restore <id|name>")
+            return
+          }
+
+          const workspace = this.findArchivedWorkspace(needle)
+          if (!workspace) {
+            this.appendGlobalLog(`Archived workspace not found: ${needle}`)
+            return
+          }
+
+          const repo = this.store.getRepoById(workspace.repoId)
+          if (!repo) {
+            this.appendGlobalLog("Workspace repo missing.")
+            return
+          }
+
+          if (existsSync(workspace.worktreePath)) {
+            this.appendGlobalLog(`Cannot restore: path already exists (${workspace.worktreePath})`)
+            return
+          }
+
+          addWorktreeForBranch({
+            repoRoot: repo.rootPath,
+            worktreePath: workspace.worktreePath,
+            branch: workspace.branch,
+          })
+
+          this.store.setWorkspaceArchived(workspace.id, false)
+          this.selectedRepoId = workspace.repoId
+          this.selectedWorkspaceId = workspace.id
+          this.reloadRepos(workspace.repoId)
+          this.reloadWorkspaces(workspace.id)
+          this.appendGlobalLog(`Restored workspace: ${workspace.name}`)
           return
         }
 
@@ -647,7 +706,7 @@ export class PiConductorApp {
           return
         }
 
-        this.appendGlobalLog("Usage: /workspace new|branches|archive|select ...")
+        this.appendGlobalLog("Usage: /workspace new|branches|archive|archived|restore|select ...")
         return
       }
 
@@ -1202,6 +1261,20 @@ export class PiConductorApp {
     return parseWorkspaceTreeValue(option.value)
   }
 
+  private listArchivedWorkspaces(): WorkspaceRecord[] {
+    const repoIds = this.selectedRepoId ? [this.selectedRepoId] : this.repos.map((repo) => repo.id)
+    return repoIds.flatMap((repoId) => this.store.listWorkspaces(repoId, true).filter((it) => it.status === "archived"))
+  }
+
+  private findArchivedWorkspace(needle: string): WorkspaceRecord | null {
+    const archived = this.listArchivedWorkspaces()
+    return (
+      archived.find((it) => String(it.id) === needle) ||
+      archived.find((it) => it.name.toLowerCase() === needle.toLowerCase()) ||
+      null
+    )
+  }
+
   private reloadRepos(preferredRepoId?: number | null) {
     this.repos = this.store.listRepos()
 
@@ -1710,7 +1783,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
     }
 
     if (!snapshot.leftSidebarCollapsed && !workspaceTreeCollapsed && workspaceTreeHasFocus) {
-      if (key.name === "up" || key.name === "k") {
+      if (key.name === "up") {
         if (snapshot.workspaceTreeOptions.length > 0) {
           key.preventDefault()
           const total = snapshot.workspaceTreeOptions.length
@@ -1721,7 +1794,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
         return
       }
 
-      if (key.name === "down" || key.name === "j") {
+      if (key.name === "down") {
         if (snapshot.workspaceTreeOptions.length > 0) {
           key.preventDefault()
           const total = snapshot.workspaceTreeOptions.length
@@ -1922,7 +1995,6 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
           >
             <box
               id="pc-workspace-tree-section"
-              shouldFill={!workspaceTreeCollapsed}
               style={{
                 flexDirection: "column",
                 flexGrow: workspaceTreeCollapsed ? 0 : 1,
@@ -2031,6 +2103,17 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                 </box>
               )}
             </box>
+
+            <text
+              id="pc-workspace-archive-tip"
+              content="Archived workspaces: /workspace archived · restore: /workspace restore <id|name>"
+              fg="#64748b"
+              wrapMode="none"
+              style={{
+                marginTop: 1,
+                flexShrink: 0,
+              }}
+            />
           </box>
         )}
 
