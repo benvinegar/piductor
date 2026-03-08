@@ -37,6 +37,7 @@ import {
 import { parseWorkspaceNewArgs, workspaceNewUsage } from "./workspace-new"
 import { extractFirstUrl, parsePrCreateArgs, prCreateUsage } from "./pr-command"
 import { buildWorkspaceScriptEnv } from "./script-env"
+import { shouldStopExistingRun, stopSignalSequence } from "./run-policy"
 
 const GLOBAL_LOG_STREAM_ID = 0
 
@@ -119,6 +120,10 @@ function isLikelyGitUrl(value: string) {
 
 function safeErr(error: unknown) {
   return error instanceof Error ? error.message : String(error)
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
 function parseArgs(input: string): string[] {
@@ -831,9 +836,9 @@ export class PiConductorApp {
             this.refreshTerminalPanel()
             return
           }
-          running.kill("SIGTERM")
+
           this.appendWorkspaceLog(workspace.id, "Requested run process stop.")
-          this.appendRunLog(workspace.id, "Requested run process stop.")
+          await this.stopRunProcess(workspace.id, "manual stop")
           this.refreshTerminalPanel()
           return
         }
@@ -896,6 +901,45 @@ export class PiConductorApp {
       stdout: String(result.stdout ?? "").trim(),
       stderr: String(result.stderr ?? "").trim(),
     }
+  }
+
+  private signalRunProcess(child: ChildProcessWithoutNullStreams, signal: NodeJS.Signals) {
+    if (!child.pid) return
+
+    try {
+      if (process.platform !== "win32") {
+        process.kill(-child.pid, signal)
+        return
+      }
+    } catch {
+      // Fall back to direct child signal below.
+    }
+
+    try {
+      child.kill(signal)
+    } catch {
+      // Already exited.
+    }
+  }
+
+  private async stopRunProcess(workspaceId: number, reason: string) {
+    const running = this.runProcessByWorkspace.get(workspaceId)
+    if (!running) return
+
+    this.appendRunLog(workspaceId, `[run] stopping (${reason}) ...`)
+
+    const [gracefulSignal, forceSignal] = stopSignalSequence()
+    this.signalRunProcess(running, gracefulSignal)
+    await sleep(220)
+
+    if (this.runProcessByWorkspace.get(workspaceId) === running) {
+      this.signalRunProcess(running, forceSignal)
+      this.appendRunLog(workspaceId, `[run] escalated to ${forceSignal}`)
+    }
+
+    this.refreshTerminalPanel()
+    this.refreshStatusPanel()
+    this.emitSnapshot()
   }
 
   private async sendMessageToSelectedAgent(message: string) {
@@ -1025,12 +1069,8 @@ export class PiConductorApp {
       return
     }
 
-    if (this.config.scripts.runMode === "nonconcurrent") {
-      const existing = this.runProcessByWorkspace.get(workspaceId)
-      if (existing) {
-        existing.kill("SIGTERM")
-        this.runProcessByWorkspace.delete(workspaceId)
-      }
+    if (shouldStopExistingRun(this.config.scripts.runMode, this.runProcessByWorkspace.has(workspaceId))) {
+      await this.stopRunProcess(workspaceId, "nonconcurrent mode")
     }
 
     const defaultBranch = getDefaultBranchName(repo.rootPath)
@@ -1045,6 +1085,7 @@ export class PiConductorApp {
       cwd: workspace.worktreePath,
       stdio: ["pipe", "pipe", "pipe"],
       env: scriptEnv,
+      detached: process.platform !== "win32",
     })
 
     child.stdout.setEncoding("utf8")
@@ -1719,9 +1760,8 @@ export class PiConductorApp {
     this.refreshLogsPanel()
     this.emitSnapshot()
 
-    for (const [workspaceId, process] of this.runProcessByWorkspace.entries()) {
-      process.kill("SIGTERM")
-      this.runProcessByWorkspace.delete(workspaceId)
+    for (const [workspaceId] of this.runProcessByWorkspace.entries()) {
+      await this.stopRunProcess(workspaceId, "app shutdown")
     }
 
     for (const [workspaceId] of this.agentByWorkspace.entries()) {
