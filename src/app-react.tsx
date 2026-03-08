@@ -42,6 +42,14 @@ import { shouldStopExistingRun, stopSignalSequence } from "./run-policy"
 import { LOADING_TOKEN, renderLoadingTokens } from "./loading"
 import { sanitizePiStderrLine, shouldSurfacePiStderr } from "./pi-stderr"
 import { DEFAULT_CONVERSATION, toConversationMarkdown as renderConversationMarkdown } from "./conversation-render"
+import {
+  clearDraftForWorkspace,
+  getWorkspaceSendMode,
+  setWorkspaceSendMode,
+  switchWorkspaceDraft,
+  type DraftState,
+  type SendModeState,
+} from "./workspace-session-state"
 
 const GLOBAL_LOG_STREAM_ID = 0
 const APP_VERSION = process.env.npm_package_version ?? "0.1.0"
@@ -218,8 +226,7 @@ export class PiConductorApp {
 
   private selectedRepoId: number | null = null
   private selectedWorkspaceId: number | null = null
-  private defaultSendMode: SendMode = "prompt"
-  private readonly sendModeByWorkspace = new Map<number, SendMode>()
+  private sendModeState: SendModeState = { defaultMode: "prompt", byWorkspace: new Map<number, SendMode>() }
 
   private readonly agentByWorkspace = new Map<number, PiRpcProcess>()
   private readonly logsByStream = new Map<number, string[]>()
@@ -256,7 +263,7 @@ export class PiConductorApp {
     workspaceTreeSelectedIndex: 0,
     selectedRepoId: null,
     selectedWorkspaceId: null,
-    sendMode: this.defaultSendMode,
+    sendMode: this.sendModeState.defaultMode,
     leftSidebarCollapsed: false,
     rightSidebarCollapsed: false,
     agentBusy: false,
@@ -1623,11 +1630,7 @@ export class PiConductorApp {
   }
 
   private getSendModeForWorkspace(workspaceId: number | null): SendMode {
-    if (!workspaceId) {
-      return this.defaultSendMode
-    }
-
-    return this.sendModeByWorkspace.get(workspaceId) ?? this.defaultSendMode
+    return getWorkspaceSendMode(this.sendModeState, workspaceId)
   }
 
   private getActiveSendMode(): SendMode {
@@ -1635,12 +1638,7 @@ export class PiConductorApp {
   }
 
   private setSendModeForCurrentSelection(mode: SendMode) {
-    if (!this.selectedWorkspaceId) {
-      this.defaultSendMode = mode
-      return
-    }
-
-    this.sendModeByWorkspace.set(this.selectedWorkspaceId, mode)
+    this.sendModeState = setWorkspaceSendMode(this.sendModeState, this.selectedWorkspaceId, mode)
   }
 
   private appendGlobalLog(message: string) {
@@ -1809,8 +1807,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
   const { width: terminalWidth } = useTerminalDimensions()
   const composerRef = useRef<TextareaRenderable | null>(null)
   const previousWorkspaceIdRef = useRef<number | null>(null)
-  const draftByWorkspaceRef = useRef(new Map<number, string>())
-  const globalDraftRef = useRef("")
+  const draftStateRef = useRef<DraftState>({ globalDraft: "", byWorkspace: new Map<number, string>() })
   const [focusTarget, setFocusTarget] = useState<FocusTarget>("input")
   const [leftColumnWidth, setLeftColumnWidth] = useState(36)
   const [rightColumnWidth, setRightColumnWidth] = useState(52)
@@ -1940,18 +1937,15 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
       return
     }
 
-    const currentDraft = composer.plainText ?? ""
-    if (previousWorkspaceId) {
-      draftByWorkspaceRef.current.set(previousWorkspaceId, currentDraft)
-    } else {
-      globalDraftRef.current = currentDraft
-    }
+    const transition = switchWorkspaceDraft(
+      draftStateRef.current,
+      previousWorkspaceId,
+      nextWorkspaceId,
+      composer.plainText ?? "",
+    )
 
-    const nextDraft = nextWorkspaceId
-      ? draftByWorkspaceRef.current.get(nextWorkspaceId) ?? ""
-      : globalDraftRef.current
-
-    composer.setText(nextDraft)
+    draftStateRef.current = transition.state
+    composer.setText(transition.nextDraft)
     previousWorkspaceIdRef.current = nextWorkspaceId
   }, [snapshot.selectedWorkspaceId])
 
@@ -2478,11 +2472,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
               placeholder="Ask the selected Pi workspace to do something…"
               onSubmit={() => {
                 const submitted = composerRef.current?.plainText ?? ""
-                if (snapshot.selectedWorkspaceId) {
-                  draftByWorkspaceRef.current.set(snapshot.selectedWorkspaceId, "")
-                } else {
-                  globalDraftRef.current = ""
-                }
+                draftStateRef.current = clearDraftForWorkspace(draftStateRef.current, snapshot.selectedWorkspaceId)
                 composerRef.current?.clear()
                 void app.submitInput(submitted)
               }}
