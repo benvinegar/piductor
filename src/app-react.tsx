@@ -44,6 +44,7 @@ import { sanitizePiStderrLine, shouldSurfacePiStderr } from "./pi-stderr"
 import { DEFAULT_CONVERSATION, toConversationMarkdown as renderConversationMarkdown } from "./conversation-render"
 
 const GLOBAL_LOG_STREAM_ID = 0
+const APP_VERSION = process.env.npm_package_version ?? "0.1.0"
 
 type FocusTarget = "repo" | "workspace" | "input"
 type ResizeEdge = "left" | "right"
@@ -1690,7 +1691,7 @@ export class PiConductorApp {
 
     this.statusText = statusLines.join("\n")
     this.conversationTabsText = workspace ? workspace.branch : "No workspace selected"
-    this.footerText = `repos=${this.repos.length} workspaces=${this.workspaces.length} · data=${this.config.dataDir} · pi=${this.config.piCommand}`
+    this.footerText = `Piductor ${APP_VERSION} · repos=${this.repos.length} workspaces=${this.workspaces.length} · data=${this.config.dataDir} · pi=${this.config.piCommand}`
   }
 
   private toConversationMarkdown(lines: string[]): string {
