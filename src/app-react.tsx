@@ -9,9 +9,10 @@ import {
   type CliRenderer,
   type KeyEvent,
   type SelectOption,
+  type TextareaRenderable,
 } from "@opentui/core"
 import { createRoot, useKeyboard, useTerminalDimensions, type Root } from "@opentui/react"
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react"
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
 import { Store } from "./db"
 import { PiRpcProcess } from "./pi-rpc"
 import type { AppConfig, RepoRecord, SendMode, WorkspaceRecord } from "./types"
@@ -1689,7 +1690,7 @@ export class PiConductorApp {
     ]
 
     this.statusText = statusLines.join("\n")
-    this.conversationTabsText = workspace ? `${workspace.name} • ${workspace.branch}` : "No workspace selected"
+    this.conversationTabsText = workspace ? workspace.branch : "No workspace selected"
     this.footerText = `repos=${this.repos.length} workspaces=${this.workspaces.length} · data=${this.config.dataDir} · pi=${this.config.piCommand}`
   }
 
@@ -1843,7 +1844,7 @@ export class PiConductorApp {
 function PiConductorView({ app }: { app: PiConductorApp }) {
   const snapshot = useSyncExternalStore(app.subscribe, app.getSnapshot, app.getSnapshot)
   const { width: terminalWidth } = useTerminalDimensions()
-  const [inputValue, setInputValue] = useState("")
+  const composerRef = useRef<TextareaRenderable | null>(null)
   const [focusTarget, setFocusTarget] = useState<FocusTarget>("input")
   const [leftColumnWidth, setLeftColumnWidth] = useState(36)
   const [rightColumnWidth, setRightColumnWidth] = useState(52)
@@ -2456,7 +2457,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
 
           <box
             id="pc-input-box"
-            height={4}
+            height={6}
             backgroundColor="#151922"
             shouldFill
             style={{
@@ -2475,25 +2476,29 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
               }}
             />
 
-            <input
+            <textarea
               id="pc-input"
+              ref={composerRef}
               focused={focusTarget === "input"}
               placeholder="Ask the selected Pi workspace to do something…"
-              value={inputValue}
-              onInput={(value) => {
-                setInputValue(value)
-              }}
-              onSubmit={(value) => {
-                const submitted = typeof value === "string" ? value : inputValue
-                setInputValue("")
+              onSubmit={() => {
+                const submitted = composerRef.current?.plainText ?? ""
+                composerRef.current?.clear()
                 void app.submitInput(submitted)
               }}
+              keyBindings={[
+                { name: "return", action: "submit" },
+                { name: "linefeed", action: "newline" },
+                { name: "return", shift: true, action: "newline" },
+              ]}
               textColor="#f9fafb"
               focusedTextColor="#ffffff"
               placeholderColor="#6b7280"
               backgroundColor="transparent"
               focusedBackgroundColor="transparent"
               cursorColor="#f9fafb"
+              wrapMode="word"
+              height={3}
               width="100%"
             />
           </box>
