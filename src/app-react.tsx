@@ -992,13 +992,23 @@ export class PiConductorApp {
       return
     }
 
-    const agent = this.agentByWorkspace.get(workspace.id)
-    if (!agent) {
+    let agent = this.agentByWorkspace.get(workspace.id)
+
+    if (!agent && this.sendMode !== "prompt") {
       this.appendWorkspaceLog(workspace.id, "Agent is not running. Use /agent start")
       return
     }
 
     this.appendWorkspaceLog(workspace.id, `[you/${this.sendMode}] ${message}`)
+
+    if (!agent) {
+      await this.startAgent(workspace.id, this.config.defaultModel)
+      agent = this.agentByWorkspace.get(workspace.id)
+      if (!agent) {
+        return
+      }
+    }
+
     this.agentTurnsInFlight.add(workspace.id)
     this.refreshStatusPanel()
     this.emitSnapshot()
@@ -1070,7 +1080,7 @@ export class PiConductorApp {
         sessionId: state?.sessionId ?? null,
       })
 
-      this.appendWorkspaceLog(workspaceId, `Agent started (pid=${agent.pid ?? "?"}).`)
+      this.appendWorkspaceLog(workspaceId, `[agent] started (pid=${agent.pid ?? "?"}).`)
     } catch (error) {
       this.store.setAgentState({
         workspaceId,
