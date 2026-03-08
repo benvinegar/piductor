@@ -210,9 +210,13 @@ export function removeWorktree(params: { repoRoot: string; worktreePath: string;
 
 export function getChangedFiles(worktreePath: string): string[] {
   const output = runAllowError("git", ["-C", worktreePath, "status", "--porcelain=v1"], worktreePath)
-  const text = (output.stdout ?? "").trim()
-  if (!text) return []
-  return text.split(/\r?\n/)
+  const text = String(output.stdout ?? "")
+  if (!text.trim()) return []
+
+  return text
+    .split(/\n/)
+    .map((line) => line.replace(/\r$/, ""))
+    .filter((line) => line.length > 0)
 }
 
 export interface ChangedFileStat {
@@ -222,19 +226,27 @@ export interface ChangedFileStat {
   status: string
 }
 
+export function parsePorcelainStatusLine(line: string): { status: string; file: string } | null {
+  if (line.length < 4) return null
+
+  const status = line.slice(0, 2).trim() || "??"
+  const rawPath = line.slice(3)
+  if (!rawPath) return null
+
+  const file = rawPath.includes(" -> ") ? (rawPath.split(" -> ").pop() ?? rawPath) : rawPath
+  if (!file) return null
+
+  return { status, file: file.trim() }
+}
+
 export function getChangedFileStats(worktreePath: string): ChangedFileStat[] {
   const statusLines = getChangedFiles(worktreePath)
   const statusMap = new Map<string, string>()
 
   for (const line of statusLines) {
-    const status = line.slice(0, 2).trim() || "??"
-    const rawPath = line.slice(3).trim()
-    if (!rawPath) continue
-
-    const file = rawPath.includes(" -> ") ? (rawPath.split(" -> ").pop()?.trim() ?? rawPath) : rawPath
-    if (!file) continue
-
-    statusMap.set(file, status)
+    const parsed = parsePorcelainStatusLine(line)
+    if (!parsed) continue
+    statusMap.set(parsed.file, parsed.status)
   }
 
   const diff = runAllowError("git", ["-C", worktreePath, "diff", "--numstat", "--no-color", "HEAD"])

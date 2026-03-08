@@ -2682,7 +2682,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                             wrapMode="none"
                             style={{
                               flexGrow: 1,
-                              flexShrink: 1,
+                              flexShrink: 0,
                             }}
                           />
                         </box>

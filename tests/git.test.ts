@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { slugify } from "../src/git"
+import { parsePorcelainStatusLine, slugify } from "../src/git"
 
 describe("slugify", () => {
   it("normalizes mixed case and punctuation", () => {
@@ -16,5 +16,21 @@ describe("slugify", () => {
 
   it("returns empty string when no alnum characters", () => {
     expect(slugify("@@@***")).toBe("")
+  })
+})
+
+describe("parsePorcelainStatusLine", () => {
+  it("preserves first filename character for leading-space statuses", () => {
+    expect(parsePorcelainStatusLine(" M README.md")).toEqual({
+      status: "M",
+      file: "README.md",
+    })
+  })
+
+  it("parses rename targets", () => {
+    expect(parsePorcelainStatusLine("R  old-name.md -> README.md")).toEqual({
+      status: "R",
+      file: "README.md",
+    })
   })
 })
