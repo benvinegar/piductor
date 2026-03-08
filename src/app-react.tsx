@@ -1703,7 +1703,7 @@ export class PiConductorApp {
 
     const flushAssistant = () => {
       if (pendingAssistant.length === 0) return
-      rendered.push(`### Pi\n\n${pendingAssistant.join("\n")}`)
+      rendered.push(pendingAssistant.join("\n"))
       pendingAssistant = []
     }
 
