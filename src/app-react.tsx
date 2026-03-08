@@ -1251,11 +1251,18 @@ export class PiConductorApp {
         break
 
       case "extension_ui_request": {
+        const method = typeof event.method === "string" ? event.method : ""
+        const requiresResponse = method === "select" || method === "confirm" || method === "input" || method === "editor"
+
+        if (!requiresResponse) {
+          break
+        }
+
         const agent = this.agentByWorkspace.get(workspaceId)
         if (agent && typeof event.id === "string") {
           agent.respondExtensionUiCancel(event.id)
         }
-        this.appendWorkspaceLog(workspaceId, "[system] Agent requested interactive extension input; auto-cancelled.")
+
         break
       }
     }
