@@ -94,6 +94,8 @@ export interface AppSnapshot {
   leftSidebarCollapsed: boolean
   rightSidebarCollapsed: boolean
   agentBusy: boolean
+  thinkingActive: boolean
+  thinkingPreview: string
   headerText: string
   statusText: string
   conversationTabsText: string
@@ -246,6 +248,8 @@ export class PiConductorApp {
     leftSidebarCollapsed: false,
     rightSidebarCollapsed: false,
     agentBusy: false,
+    thinkingActive: false,
+    thinkingPreview: "",
     headerText: this.headerText,
     statusText: this.statusText,
     conversationTabsText: this.conversationTabsText,
@@ -298,6 +302,11 @@ export class PiConductorApp {
   }
 
   private emitSnapshot() {
+    const selectedWorkspaceId = this.selectedWorkspaceId
+    const thinkingRaw = selectedWorkspaceId ? this.thinkingPartialByWorkspace.get(selectedWorkspaceId) ?? "" : ""
+    const thinkingPreview = thinkingRaw.replace(/\s+/g, " ").trim()
+    const thinkingActive = selectedWorkspaceId ? this.agentTurnsInFlight.has(selectedWorkspaceId) : false
+
     this.snapshot = {
       repos: [...this.repos],
       workspaces: [...this.workspaces],
@@ -313,6 +322,8 @@ export class PiConductorApp {
       leftSidebarCollapsed: this.leftSidebarCollapsed,
       rightSidebarCollapsed: this.rightSidebarCollapsed,
       agentBusy: this.agentBusy,
+      thinkingActive,
+      thinkingPreview,
       headerText: this.headerText,
       statusText: this.statusText,
       conversationTabsText: this.conversationTabsText,
@@ -1292,25 +1303,12 @@ export class PiConductorApp {
 
   private appendThinkingStream(workspaceId: number, delta: string) {
     const current = this.thinkingPartialByWorkspace.get(workspaceId) ?? ""
-    const combined = current + delta
-    const parts = combined.split(/\r?\n/)
-
-    for (let i = 0; i < parts.length - 1; i++) {
-      const line = parts[i]
-      if (line.length > 0) {
-        this.appendWorkspaceLog(workspaceId, `[thinking] ${line}`)
-      }
-    }
-
-    const remainder = parts[parts.length - 1] ?? ""
-    this.thinkingPartialByWorkspace.set(workspaceId, remainder)
+    const combined = `${current}${delta}`
+    const clipped = combined.slice(-240)
+    this.thinkingPartialByWorkspace.set(workspaceId, clipped)
   }
 
   private flushThinkingPartial(workspaceId: number) {
-    const partial = this.thinkingPartialByWorkspace.get(workspaceId)
-    if (partial && partial.trim().length > 0) {
-      this.appendWorkspaceLog(workspaceId, `[thinking] ${partial}`)
-    }
     this.thinkingPartialByWorkspace.delete(workspaceId)
   }
 
@@ -1705,9 +1703,6 @@ export class PiConductorApp {
       }
 
       if (line.startsWith("[thinking]")) {
-        flushAssistant()
-        const content = line.replace(/^\[thinking\]\s*/, "")
-        rendered.push(`> 💭 **Thinking**\n>\n> ${content}`)
         continue
       }
 
@@ -1895,6 +1890,9 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
   }, [hasLoadingToken])
 
   const composerSpinner = hasLoadingToken ? renderLoadingTokens(LOADING_TOKEN, loadingFrameIndex) : ""
+  const thinkingIndicatorText = snapshot.thinkingActive
+    ? `${composerSpinner || "•"} Thinking${snapshot.thinkingPreview ? ` · ${snapshot.thinkingPreview}` : "…"}`
+    : ""
 
   const workspaceTreeHasFocus = focusTarget === "workspace" || focusTarget === "repo"
 
@@ -2372,6 +2370,19 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                 marginBottom: 1,
               }}
             />
+
+            {snapshot.thinkingActive && (
+              <text
+                id="pc-thinking-indicator"
+                content={thinkingIndicatorText}
+                fg="#93c5fd"
+                wrapMode="word"
+                style={{
+                  flexShrink: 0,
+                  marginBottom: 1,
+                }}
+              />
+            )}
 
             <scrollbox
               id="pc-conversation-scroll"
