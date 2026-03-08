@@ -81,12 +81,6 @@ function formatSectionHeader(title: string, collapsed: boolean, width: number): 
   return `${prefix}${"─".repeat(filler)}`
 }
 
-function formatLineHeader(title: string, width: number): string {
-  const prefix = `${title} `
-  const filler = Math.max(0, width - prefix.length)
-  return `${prefix}${"─".repeat(filler)}`
-}
-
 type DiffRow = {
   plus: string
   minus: string
@@ -1842,7 +1836,16 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
     24,
     terminalWidth - (leftVisible ? leftColumnWidth + 1 : 0) - (rightVisible ? rightColumnWidth + 1 : 0),
   )
-  const conversationHeaderText = formatLineHeader(snapshot.conversationTabsText, Math.max(12, centerColumnWidth - 2))
+  const headerActions = "/help · /mode · /ui"
+  const headerWidth = Math.max(12, centerColumnWidth - 2)
+  const minGap = 3
+  const maxTitleWidth = Math.max(4, headerWidth - headerActions.length - minGap)
+  const truncatedTitle =
+    snapshot.conversationTabsText.length > maxTitleWidth
+      ? `${snapshot.conversationTabsText.slice(0, Math.max(0, maxTitleWidth - 1))}…`
+      : snapshot.conversationTabsText
+  const fillerLen = Math.max(1, headerWidth - truncatedTitle.length - headerActions.length - 2)
+  const conversationHeaderText = `${truncatedTitle} ${"─".repeat(fillerLen)} ${headerActions}`
 
   const hasLoadingToken = snapshot.agentBusy
   useEffect(() => {
@@ -2055,9 +2058,6 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
     }
   })
 
-  const leftToggleLabel = snapshot.leftSidebarCollapsed ? "[+] Left" : "[-] Left"
-  const rightToggleLabel = snapshot.rightSidebarCollapsed ? "Right [+]" : "Right [-]"
-
   return (
     <box
       id="pc-root"
@@ -2068,71 +2068,6 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
         flexDirection: "column",
       }}
     >
-      <box
-        id="pc-topbar"
-        height={2}
-        border
-        borderStyle="single"
-        borderColor="#2a3344"
-        backgroundColor="#0f141d"
-        style={{
-          flexShrink: 0,
-          flexDirection: "row",
-          alignItems: "center",
-          paddingLeft: 1,
-          paddingRight: 1,
-        }}
-      >
-        <box
-          id="pc-left-toggle-btn"
-          width={10}
-          height={1}
-          backgroundColor={snapshot.leftSidebarCollapsed ? "#2f3b52" : "#1d2840"}
-          onMouseDown={() => {
-            app.toggleLeftSidebar()
-          }}
-          style={{
-            flexShrink: 0,
-            marginRight: 1,
-            flexDirection: "row",
-            alignItems: "center",
-            justifyContent: "center",
-          }}
-        >
-          <text id="pc-left-toggle" content={leftToggleLabel} fg="#bfdbfe" selectable={false} />
-        </box>
-
-        <text
-          id="pc-header-text"
-          content={snapshot.headerText}
-          fg="#d1d5db"
-          wrapMode="none"
-          style={{
-            flexGrow: 1,
-            flexShrink: 1,
-          }}
-        />
-
-        <box
-          id="pc-right-toggle-btn"
-          width={11}
-          height={1}
-          backgroundColor={snapshot.rightSidebarCollapsed ? "#2f3b52" : "#1d2840"}
-          onMouseDown={() => {
-            app.toggleRightSidebar()
-          }}
-          style={{
-            flexShrink: 0,
-            marginLeft: 1,
-            flexDirection: "row",
-            alignItems: "center",
-            justifyContent: "center",
-          }}
-        >
-          <text id="pc-right-toggle" content={rightToggleLabel} fg="#bfdbfe" selectable={false} />
-        </box>
-      </box>
-
       <box
         id="pc-body"
         shouldFill
@@ -2160,7 +2095,6 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
           flexDirection: "row",
           flexGrow: 1,
           flexShrink: 1,
-          marginTop: 1,
         }}
       >
         {!snapshot.leftSidebarCollapsed && (
