@@ -1194,6 +1194,10 @@ export class PiConductorApp {
         this.appendWorkspaceLog(workspaceId, "[agent] started turn")
         break
 
+      case "turn_start":
+        this.agentTurnsInFlight.add(workspaceId)
+        break
+
       case "agent_end":
         this.agentTurnsInFlight.delete(workspaceId)
         this.flushThinkingPartial(workspaceId)
@@ -1222,6 +1226,10 @@ export class PiConductorApp {
       }
 
       case "message_end":
+        this.flushThinkingPartial(workspaceId)
+        this.flushAssistantPartial(workspaceId)
+        break
+
       case "turn_end":
         this.agentTurnsInFlight.delete(workspaceId)
         this.flushThinkingPartial(workspaceId)
