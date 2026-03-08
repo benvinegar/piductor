@@ -214,7 +214,7 @@ function expandUserPath(value: string): string {
 }
 
 const DEFAULT_CONVERSATION = "_No conversation yet. Start an agent and send a prompt._"
-const MESSAGE_SEPARATOR = "┈"
+const MESSAGE_SPACER = "\u200B"
 
 export class PiConductorApp {
   private readonly renderer: CliRenderer
@@ -1769,7 +1769,7 @@ export class PiConductorApp {
 
     flushAssistant()
 
-    return rendered.join(`\n\n${MESSAGE_SEPARATOR}\n\n`) || DEFAULT_CONVERSATION
+    return rendered.join(`\n\n${MESSAGE_SPACER}\n\n`) || DEFAULT_CONVERSATION
   }
 
   private refreshLogsPanel() {
