@@ -41,6 +41,7 @@ import { buildWorkspaceScriptEnv } from "./script-env"
 import { shouldStopExistingRun, stopSignalSequence } from "./run-policy"
 import { LOADING_TOKEN, renderLoadingTokens } from "./loading"
 import { sanitizePiStderrLine, shouldSurfacePiStderr } from "./pi-stderr"
+import { DEFAULT_CONVERSATION, toConversationMarkdown as renderConversationMarkdown } from "./conversation-render"
 
 const GLOBAL_LOG_STREAM_ID = 0
 
@@ -84,28 +85,6 @@ function formatLineHeader(title: string, width: number): string {
   const prefix = `${title} `
   const filler = Math.max(0, width - prefix.length)
   return `${prefix}${"─".repeat(filler)}`
-}
-
-function formatUserMessageBox(content: string): string {
-  const rawLines = content.split(/\r?\n/).map((line) => line.trimEnd())
-  const lines = rawLines.length > 0 ? rawLines : [""]
-  const longest = Math.max(...lines.map((line) => line.length), 8)
-  const width = Math.min(72, Math.max(8, longest))
-
-  const clipped = lines.map((line) => {
-    if (line.length <= width) return line
-    return `${line.slice(0, Math.max(0, width - 1))}…`
-  })
-
-  const top = `╭${"─".repeat(width + 2)}╮`
-  const body = clipped.map((line) => `│ ${line}${" ".repeat(Math.max(0, width - line.length))} │`)
-  const bottom = `╰${"─".repeat(width + 2)}╯`
-  return [top, ...body, bottom].join("\n")
-}
-
-function formatAssistantMessageRail(content: string): string {
-  const lines = content.split(/\r?\n/)
-  return lines.map((line) => `│ ${line}`).join("\n")
 }
 
 export interface AppSnapshot {
@@ -217,9 +196,6 @@ function expandUserPath(value: string): string {
   if (value.startsWith("~/")) return path.join(os.homedir(), value.slice(2))
   return value
 }
-
-const DEFAULT_CONVERSATION = "_No conversation yet. Start an agent and send a prompt._"
-const MESSAGE_SPACER = "\u200B"
 
 export class PiConductorApp {
   private readonly renderer: CliRenderer
@@ -1711,86 +1687,8 @@ export class PiConductorApp {
     this.footerText = `repos=${this.repos.length} workspaces=${this.workspaces.length} · data=${this.config.dataDir} · pi=${this.config.piCommand}`
   }
 
-  private stripTimestamp(line: string): string {
-    return line.replace(/^\[\d{2}:\d{2}:\d{2}\]\s*/, "")
-  }
-
   private toConversationMarkdown(lines: string[]): string {
-    if (lines.length === 0) {
-      return DEFAULT_CONVERSATION
-    }
-
-    const rendered: string[] = []
-    let pendingAssistant: string[] = []
-
-    const flushAssistant = () => {
-      if (pendingAssistant.length === 0) return
-      rendered.push(`\`\`\`text\n${formatAssistantMessageRail(pendingAssistant.join("\n"))}\n\`\`\``)
-      pendingAssistant = []
-    }
-
-    const recent = lines.slice(-300)
-    for (const rawLine of recent) {
-      const line = this.stripTimestamp(rawLine)
-      if (!line.trim()) continue
-
-      if (line.startsWith("[you/")) {
-        flushAssistant()
-        const content = line.replace(/^\[you\/[\w_\-]+\]\s*/, "")
-        rendered.push(`\`\`\`text\n${formatUserMessageBox(content)}\n\`\`\``)
-        continue
-      }
-
-      if (line.startsWith("[thinking]")) {
-        continue
-      }
-
-      if (line.startsWith("[tool]")) {
-        continue
-      }
-
-      if (line.startsWith("[agent]")) {
-        flushAssistant()
-        continue
-      }
-
-      if (line.startsWith("[pi:stderr]")) {
-        flushAssistant()
-        const content = line.replace(/^\[pi:stderr\]\s*/, "")
-        rendered.push(`> ⚠️ ${content}`)
-        continue
-      }
-
-      if (line.startsWith("ERROR:")) {
-        flushAssistant()
-        rendered.push(`> ❌ ${line}`)
-        continue
-      }
-
-      if (line.startsWith("[system]")) {
-        flushAssistant()
-        const content = line.replace(/^\[system\]\s*/, "")
-        rendered.push(`> ℹ️ ${content}`)
-        continue
-      }
-
-      if (line.startsWith("[extension-ui]")) {
-        flushAssistant()
-        rendered.push(`> ℹ️ Agent requested extension UI input.`)
-        continue
-      }
-
-      if (line.startsWith("[assistant-break]")) {
-        flushAssistant()
-        continue
-      }
-
-      pendingAssistant.push(line)
-    }
-
-    flushAssistant()
-
-    return rendered.join(`\n\n${MESSAGE_SPACER}\n\n`) || DEFAULT_CONVERSATION
+    return renderConversationMarkdown(lines)
   }
 
   private refreshLogsPanel() {
