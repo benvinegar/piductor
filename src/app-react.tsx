@@ -1765,7 +1765,7 @@ export class PiConductorApp {
 
     flushAssistant()
 
-    return rendered.join("\n\n") || DEFAULT_CONVERSATION
+    return rendered.join("\n\n\n") || DEFAULT_CONVERSATION
   }
 
   private refreshLogsPanel() {
@@ -2388,19 +2388,6 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
               }}
             />
 
-            {snapshot.thinkingActive && (
-              <text
-                id="pc-thinking-indicator"
-                content={thinkingIndicatorText}
-                fg="#93c5fd"
-                wrapMode="word"
-                style={{
-                  flexShrink: 0,
-                  marginBottom: 1,
-                }}
-              />
-            )}
-
             <scrollbox
               id="pc-conversation-scroll"
               border={false}
@@ -2432,6 +2419,19 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                 conceal
                 width="100%"
               />
+
+              {snapshot.thinkingActive && (
+                <text
+                  id="pc-thinking-indicator"
+                  content={thinkingIndicatorText}
+                  fg="#93c5fd"
+                  wrapMode="word"
+                  style={{
+                    marginTop: 1,
+                    flexShrink: 0,
+                  }}
+                />
+              )}
             </scrollbox>
           </box>
 
