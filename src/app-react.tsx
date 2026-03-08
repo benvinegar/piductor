@@ -9,7 +9,7 @@ import {
   type KeyEvent,
   type SelectOption,
 } from "@opentui/core"
-import { createRoot, useKeyboard, type Root } from "@opentui/react"
+import { createRoot, useKeyboard, useTerminalDimensions, type Root } from "@opentui/react"
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react"
 import { Store } from "./db"
 import { PiRpcProcess } from "./pi-rpc"
@@ -27,6 +27,33 @@ import {
 const GLOBAL_LOG_STREAM_ID = 0
 
 type FocusTarget = "repo" | "workspace" | "input"
+type ResizeEdge = "left" | "right"
+type ResizeState = {
+  edge: ResizeEdge
+  startX: number
+  startLeftWidth: number
+  startRightWidth: number
+}
+
+const MIN_LEFT_WIDTH = 24
+const MAX_LEFT_WIDTH = 72
+const MIN_RIGHT_WIDTH = 34
+const MAX_RIGHT_WIDTH = 84
+const MIN_CENTER_WIDTH = 52
+
+function clamp(value: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, value))
+}
+
+function maxLeftWidth(totalWidth: number, rightVisible: boolean, rightWidth: number): number {
+  const splitters = rightVisible ? 2 : 1
+  return totalWidth - (rightVisible ? rightWidth : 0) - splitters - MIN_CENTER_WIDTH
+}
+
+function maxRightWidth(totalWidth: number, leftVisible: boolean, leftWidth: number): number {
+  const splitters = leftVisible ? 2 : 1
+  return totalWidth - (leftVisible ? leftWidth : 0) - splitters - MIN_CENTER_WIDTH
+}
 
 export interface AppSnapshot {
   repos: RepoRecord[]
@@ -368,6 +395,7 @@ export class PiConductorApp {
         this.appendGlobalLog("  /ui left|right|toggle")
         this.appendGlobalLog("Plain text sends to selected agent in current mode.")
         this.appendGlobalLog("UI: click [+]/[-] in top bar to collapse sidebars (or ctrl+left / ctrl+right).")
+        this.appendGlobalLog("UI: drag the vertical separators to resize side columns.")
         return
       }
 
@@ -1281,8 +1309,12 @@ export class PiConductorApp {
 
 function PiConductorView({ app }: { app: PiConductorApp }) {
   const snapshot = useSyncExternalStore(app.subscribe, app.getSnapshot, app.getSnapshot)
+  const { width: terminalWidth } = useTerminalDimensions()
   const [inputValue, setInputValue] = useState("")
   const [focusTarget, setFocusTarget] = useState<FocusTarget>("input")
+  const [leftColumnWidth, setLeftColumnWidth] = useState(36)
+  const [rightColumnWidth, setRightColumnWidth] = useState(52)
+  const [resizeState, setResizeState] = useState<ResizeState | null>(null)
 
   const conversationSyntaxStyle = useMemo(
     () =>
@@ -1315,11 +1347,67 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
     [],
   )
 
+  const leftVisible = !snapshot.leftSidebarCollapsed
+  const rightVisible = !snapshot.rightSidebarCollapsed
+
   useEffect(() => {
     if (snapshot.leftSidebarCollapsed && (focusTarget === "repo" || focusTarget === "workspace")) {
       setFocusTarget("input")
     }
   }, [snapshot.leftSidebarCollapsed, focusTarget])
+
+  useEffect(() => {
+    if (resizeState?.edge === "left" && !leftVisible) {
+      setResizeState(null)
+    }
+    if (resizeState?.edge === "right" && !rightVisible) {
+      setResizeState(null)
+    }
+  }, [resizeState, leftVisible, rightVisible])
+
+  useEffect(() => {
+    if (leftVisible) {
+      const layoutMax = maxLeftWidth(terminalWidth, rightVisible, rightColumnWidth)
+      const maxAllowed = Math.min(MAX_LEFT_WIDTH, Math.max(MIN_LEFT_WIDTH, layoutMax))
+      setLeftColumnWidth((current) => clamp(current, MIN_LEFT_WIDTH, maxAllowed))
+    }
+
+    if (rightVisible) {
+      const layoutMax = maxRightWidth(terminalWidth, leftVisible, leftColumnWidth)
+      const maxAllowed = Math.min(MAX_RIGHT_WIDTH, Math.max(MIN_RIGHT_WIDTH, layoutMax))
+      setRightColumnWidth((current) => clamp(current, MIN_RIGHT_WIDTH, maxAllowed))
+    }
+  }, [terminalWidth, leftVisible, rightVisible, leftColumnWidth, rightColumnWidth])
+
+  const startResize = (edge: ResizeEdge, x: number) => {
+    setResizeState({
+      edge,
+      startX: x,
+      startLeftWidth: leftColumnWidth,
+      startRightWidth: rightColumnWidth,
+    })
+  }
+
+  const dragResize = (edge: ResizeEdge, x: number) => {
+    if (!resizeState || resizeState.edge !== edge) return
+
+    const delta = x - resizeState.startX
+    if (edge === "left") {
+      const layoutMax = maxLeftWidth(terminalWidth, rightVisible, resizeState.startRightWidth)
+      const maxAllowed = Math.min(MAX_LEFT_WIDTH, Math.max(MIN_LEFT_WIDTH, layoutMax))
+      const next = clamp(resizeState.startLeftWidth + delta, MIN_LEFT_WIDTH, maxAllowed)
+      setLeftColumnWidth(next)
+      return
+    }
+
+    const layoutMax = maxRightWidth(terminalWidth, leftVisible, resizeState.startLeftWidth)
+    const maxAllowed = Math.min(MAX_RIGHT_WIDTH, Math.max(MIN_RIGHT_WIDTH, layoutMax))
+    const next = clamp(resizeState.startRightWidth - delta, MIN_RIGHT_WIDTH, maxAllowed)
+    setRightColumnWidth(next)
+  }
+
+  const leftResizerActive = resizeState?.edge === "left"
+  const rightResizerActive = resizeState?.edge === "right"
 
   useKeyboard((key: KeyEvent) => {
     if (key.ctrl && key.name === "1") {
@@ -1482,7 +1570,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
         {!snapshot.leftSidebarCollapsed && (
           <box
             id="pc-sidebar"
-            width={36}
+            width={leftColumnWidth}
             border
             borderStyle="single"
             borderColor="#2a3344"
@@ -1490,7 +1578,6 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
             shouldFill
             style={{
               flexDirection: "column",
-              marginRight: 1,
             }}
           >
             <text id="pc-nav-title" content=" Workspace Navigator" fg="#e5e7eb" style={{ flexShrink: 0 }} />
@@ -1566,13 +1653,35 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
           </box>
         )}
 
+        {leftVisible && (
+          <box
+            id="pc-left-resizer"
+            width={1}
+            shouldFill
+            backgroundColor={leftResizerActive ? "#60a5fa" : "#273142"}
+            onMouseDown={(event) => {
+              event.preventDefault()
+              startResize("left", event.x)
+            }}
+            onMouseDrag={(event) => {
+              event.preventDefault()
+              dragResize("left", event.x)
+            }}
+            onMouseDragEnd={() => {
+              setResizeState(null)
+            }}
+            onMouseUp={() => {
+              setResizeState(null)
+            }}
+          />
+        )}
+
         <box
           id="pc-center"
           shouldFill
           style={{
             flexDirection: "column",
             flexGrow: 2,
-            marginRight: snapshot.rightSidebarCollapsed ? 0 : 1,
           }}
         >
           <box
@@ -1683,10 +1792,33 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
           </box>
         </box>
 
-        {!snapshot.rightSidebarCollapsed && (
+        {rightVisible && (
+          <box
+            id="pc-right-resizer"
+            width={1}
+            shouldFill
+            backgroundColor={rightResizerActive ? "#60a5fa" : "#273142"}
+            onMouseDown={(event) => {
+              event.preventDefault()
+              startResize("right", event.x)
+            }}
+            onMouseDrag={(event) => {
+              event.preventDefault()
+              dragResize("right", event.x)
+            }}
+            onMouseDragEnd={() => {
+              setResizeState(null)
+            }}
+            onMouseUp={() => {
+              setResizeState(null)
+            }}
+          />
+        )}
+
+        {rightVisible && (
           <box
             id="pc-right"
-            width={52}
+            width={rightColumnWidth}
             border
             borderStyle="single"
             borderColor="#2a3344"

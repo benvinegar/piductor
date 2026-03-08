@@ -12,6 +12,7 @@ Built with OpenTUI + OpenTUI React.
 - Stream agent/tool logs into the UI.
 - Run setup/run/archive scripts.
 - View changed files + diff preview.
+- Resize left/right side columns by dragging vertical separators.
 
 ## Install
 
