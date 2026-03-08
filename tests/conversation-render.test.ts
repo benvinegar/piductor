@@ -18,18 +18,14 @@ describe("conversation-render", () => {
     expect(box).toContain("╰")
   })
 
-  it("formats assistant output as markdown blockquote lines", () => {
-    const rail = formatAssistantMessageRail("first line\nsecond line")
-    const lines = rail.split("\n")
-
-    expect(lines).toEqual(["> first line", "> second line"])
+  it("passes assistant markdown through without forced quote markers", () => {
+    const output = formatAssistantMessageRail("**bold**\n- item")
+    expect(output).toBe("**bold**\n- item")
   })
 
   it("preserves extra blank lines in assistant output", () => {
-    const rail = formatAssistantMessageRail("line A\n\nline B")
-    const lines = rail.split("\n")
-
-    expect(lines).toEqual(["> line A", ">", "> line B"])
+    const output = formatAssistantMessageRail("line A\n\nline B")
+    expect(output).toBe("line A\n\nline B")
   })
 
   it("keeps markdown tokens in assistant output and separates message blocks", () => {
@@ -52,9 +48,8 @@ describe("conversation-render", () => {
       "[12:00:03] Line three",
     ])
 
-    expect(rendered).toContain("> Line one")
-    expect(rendered).toContain("\n>\n")
-    expect(rendered).toContain("> Line three")
+    expect(rendered).toContain("Line one")
+    expect(rendered).toContain("\n\nLine three")
   })
 
   it("suppresses tool chatter lines", () => {
