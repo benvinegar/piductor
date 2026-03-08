@@ -2395,8 +2395,10 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
               }}
               keyBindings={[
                 { name: "return", action: "submit" },
-                { name: "linefeed", action: "newline" },
+                { name: "linefeed", action: "submit" },
                 { name: "return", shift: true, action: "newline" },
+                { name: "linefeed", shift: true, action: "newline" },
+                { name: "j", ctrl: true, action: "newline" },
               ]}
               textColor="#f9fafb"
               focusedTextColor="#ffffff"
