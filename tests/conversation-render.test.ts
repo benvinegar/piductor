@@ -18,16 +18,11 @@ describe("conversation-render", () => {
     expect(box).toContain("╰")
   })
 
-  it("wraps assistant lines and keeps rail prefix on wrapped lines", () => {
-    const rail = formatAssistantMessageRail(
-      "This is a very long assistant sentence that should wrap and keep the left rail visible on every wrapped visual line.",
-    )
-
+  it("formats assistant output as markdown blockquote lines", () => {
+    const rail = formatAssistantMessageRail("first line\nsecond line")
     const lines = rail.split("\n")
-    expect(lines.length).toBeGreaterThan(1)
-    for (const line of lines) {
-      expect(line.startsWith("│ ")).toBe(true)
-    }
+
+    expect(lines).toEqual(["> first line", "> second line"])
   })
 
   it("keeps markdown tokens in assistant output and separates message blocks", () => {
@@ -40,7 +35,7 @@ describe("conversation-render", () => {
 
     expect(rendered).toContain("**Repo tour**")
     expect(rendered).toContain("second reply")
-    expect(rendered).toContain("\u200B")
+    expect(rendered).toContain("...")
   })
 
   it("suppresses tool chatter lines", () => {

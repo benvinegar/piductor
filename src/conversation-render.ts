@@ -1,6 +1,5 @@
 export const DEFAULT_CONVERSATION = "_No conversation yet. Start an agent and send a prompt._"
-const MESSAGE_SPACER = "\u200B"
-const ASSISTANT_WRAP_WIDTH = 56
+const MESSAGE_SPACER = "..."
 
 function stripTimestamp(line: string): string {
   return line.replace(/^\[\d{2}:\d{2}:\d{2}\]\s*/, "")
@@ -23,33 +22,9 @@ export function formatUserMessageBox(content: string): string {
   return [top, ...body, bottom].join("\n")
 }
 
-function wrapAssistantLine(line: string, width: number): string[] {
-  if (line.length <= width) return [line]
-
-  const chunks: string[] = []
-  let remaining = line
-
-  while (remaining.length > width) {
-    let splitAt = remaining.lastIndexOf(" ", width)
-    if (splitAt <= 0) splitAt = width
-
-    const chunk = remaining.slice(0, splitAt).trimEnd()
-    chunks.push(chunk)
-    remaining = remaining.slice(splitAt).trimStart()
-  }
-
-  chunks.push(remaining)
-  return chunks
-}
-
 export function formatAssistantMessageRail(content: string): string {
-  const wrapped: string[] = []
-  for (const line of content.split(/\r?\n/)) {
-    const segments = wrapAssistantLine(line, ASSISTANT_WRAP_WIDTH)
-    wrapped.push(...segments)
-  }
-
-  return wrapped.map((line) => `│ ${line}`).join("\n")
+  const lines = content.split(/\r?\n/)
+  return lines.map((line) => `> ${line.length > 0 ? line : "\u00A0"}`).join("\n")
 }
 
 export function toConversationMarkdown(lines: string[]): string {
