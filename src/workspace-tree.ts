@@ -53,5 +53,5 @@ export function formatWorkspaceTreeRowName(params: {
     return `${params.expanded ? "▾" : "▸"} ${params.repoId} - ${params.repoName ?? "repo"}`
   }
 
-  return `  > ${params.workspaceName ?? "workspace"} · ${params.branch ?? "branch"} [+${params.added ?? 0} -${params.removed ?? 0}]`
+  return `  ${params.branch ?? params.workspaceName ?? "branch"}`
 }

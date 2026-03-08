@@ -47,6 +47,6 @@ describe("workspace-tree helpers", () => {
         added: 12,
         removed: 4,
       }),
-    ).toBe("  > feature-a · pc/feature-a [+12 -4]")
+    ).toBe("  pc/feature-a")
   })
 })

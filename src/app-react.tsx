@@ -1408,7 +1408,7 @@ export class PiConductorApp {
     const treeOptions: SelectOption[] = []
 
     for (const repo of this.repos) {
-      const repoWorkspaces = this.store.listWorkspaces(repo.id)
+      const repoWorkspaces = this.store.listWorkspaces(repo.id).sort((a, b) => a.id - b.id)
       const expanded = this.expandedRepoIds.has(repo.id)
 
       treeOptions.push({
@@ -1437,7 +1437,7 @@ export class PiConductorApp {
             added,
             removed,
           }),
-          description: workspace.worktreePath,
+          description: `+${added} -${removed}`,
           value: workspaceTreeValue(repo.id, workspace.id),
         })
       }
@@ -1477,7 +1477,7 @@ export class PiConductorApp {
   }
 
   private reloadRepos(preferredRepoId?: number | null) {
-    this.repos = this.store.listRepos()
+    this.repos = this.store.listRepos().sort((a, b) => a.id - b.id)
 
     if (this.repos.length === 0) {
       this.selectedRepoId = null
@@ -1517,7 +1517,7 @@ export class PiConductorApp {
       return
     }
 
-    this.workspaces = this.store.listWorkspaces(this.selectedRepoId)
+    this.workspaces = this.store.listWorkspaces(this.selectedRepoId).sort((a, b) => a.id - b.id)
 
     if (this.workspaces.length === 0) {
       this.selectedWorkspaceId = null
@@ -2174,6 +2174,9 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                       const selected = index === snapshot.workspaceTreeSelectedIndex
                       const value = String(option.value ?? "")
                       const isRepoRow = value.startsWith(TREE_REPO_PREFIX)
+                      const workspaceDiff = !isRepoRow ? String(option.description ?? "") : ""
+                      const marker = isRepoRow ? " " : selected ? "●" : "○"
+
                       return (
                         <box
                           key={value}
@@ -2190,6 +2193,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                             flexDirection: "row",
                             alignItems: "center",
                             flexShrink: 0,
+                            marginBottom: isRepoRow ? 0 : 1,
                           }}
                         >
                           <text
@@ -2202,10 +2206,25 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                               flexShrink: 1,
                             }}
                           />
+
+                          {!isRepoRow && (
+                            <text
+                              id={`pc-workspace-tree-row-diff-${index}`}
+                              content={workspaceDiff}
+                              fg="#94a3b8"
+                              wrapMode="none"
+                              selectable={false}
+                              style={{
+                                flexShrink: 0,
+                                marginLeft: 1,
+                              }}
+                            />
+                          )}
+
                           <text
                             id={`pc-workspace-tree-row-marker-${index}`}
-                            content={selected ? "●" : " "}
-                            fg={selected ? "#93c5fd" : "#475569"}
+                            content={marker}
+                            fg={selected ? "#93c5fd" : "#64748b"}
                             selectable={false}
                             style={{
                               flexShrink: 0,
