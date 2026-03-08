@@ -4,7 +4,7 @@ This file is for automated coding agents working in this repository.
 
 ## Scope
 
-This project is the **React-based** OpenTUI prototype for Pi Conductor.
+This project is the **React-based** OpenTUI prototype for Piductor.
 
 - Use `@opentui/react` + `@opentui/core`
 - **Do not migrate to Solid** unless explicitly requested

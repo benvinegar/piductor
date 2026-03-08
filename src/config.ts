@@ -9,11 +9,14 @@ type RawConfig = Partial<
   }
 >
 
+const APP_SLUG = "piductor"
+const LEGACY_APP_SLUG = "piconductor"
+
 const DEFAULTS = (cwd: string): AppConfig => ({
-  dataDir: path.join(cwd, ".piconductor"),
-  reposDir: path.join(cwd, ".piconductor", "repos"),
-  workspacesDir: path.join(cwd, ".piconductor", "workspaces"),
-  dbPath: path.join(cwd, ".piconductor", "piconductor.sqlite"),
+  dataDir: path.join(cwd, `.${APP_SLUG}`),
+  reposDir: path.join(cwd, `.${APP_SLUG}`, "repos"),
+  workspacesDir: path.join(cwd, `.${APP_SLUG}`, "workspaces"),
+  dbPath: path.join(cwd, `.${APP_SLUG}`, `${APP_SLUG}.sqlite`),
   piCommand: "pi",
   defaultModel: undefined,
   maxLogLines: 500,
@@ -53,6 +56,15 @@ function merge(base: AppConfig, override: RawConfig): AppConfig {
   }
 }
 
+function chooseDbPath(dataDir: string): string {
+  const preferred = path.join(dataDir, `${APP_SLUG}.sqlite`)
+  const legacy = path.join(dataDir, `${LEGACY_APP_SLUG}.sqlite`)
+
+  if (existsSync(preferred)) return preferred
+  if (existsSync(legacy)) return legacy
+  return preferred
+}
+
 export interface LoadedConfig {
   config: AppConfig
   userConfigPath: string
@@ -60,24 +72,48 @@ export interface LoadedConfig {
 }
 
 export function loadConfig(cwd: string = process.cwd()): LoadedConfig {
-  const userConfigPath = path.join(os.homedir(), ".config", "piconductor", "config.json")
-  const projectConfigPath = path.join(cwd, "piconductor.json")
+  const userConfigPath = path.join(os.homedir(), ".config", APP_SLUG, "config.json")
+  const legacyUserConfigPath = path.join(os.homedir(), ".config", LEGACY_APP_SLUG, "config.json")
+
+  const projectConfigPath = path.join(cwd, `${APP_SLUG}.json`)
+  const legacyProjectConfigPath = path.join(cwd, `${LEGACY_APP_SLUG}.json`)
 
   let config = DEFAULTS(cwd)
 
-  if (existsSync(userConfigPath)) {
+  const hasUserConfig = existsSync(userConfigPath)
+  const hasLegacyUserConfig = existsSync(legacyUserConfigPath)
+  const hasProjectConfig = existsSync(projectConfigPath)
+  const hasLegacyProjectConfig = existsSync(legacyProjectConfigPath)
+
+  if (hasUserConfig) {
     const rawUser = normalizeRaw(readJson(userConfigPath), path.dirname(userConfigPath))
+    config = merge(config, rawUser)
+  } else if (hasLegacyUserConfig) {
+    const rawUser = normalizeRaw(readJson(legacyUserConfigPath), path.dirname(legacyUserConfigPath))
     config = merge(config, rawUser)
   }
 
-  if (existsSync(projectConfigPath)) {
+  if (hasProjectConfig) {
     const rawProject = normalizeRaw(readJson(projectConfigPath), path.dirname(projectConfigPath))
     config = merge(config, rawProject)
+  } else if (hasLegacyProjectConfig) {
+    const rawProject = normalizeRaw(readJson(legacyProjectConfigPath), path.dirname(legacyProjectConfigPath))
+    config = merge(config, rawProject)
+  }
+
+  const usedAnyConfigFile = hasUserConfig || hasLegacyUserConfig || hasProjectConfig || hasLegacyProjectConfig
+  const legacyDataDir = path.join(cwd, `.${LEGACY_APP_SLUG}`)
+
+  if (!usedAnyConfigFile && !existsSync(config.dataDir) && existsSync(legacyDataDir)) {
+    config.dataDir = legacyDataDir
+    config.reposDir = path.join(legacyDataDir, "repos")
+    config.workspacesDir = path.join(legacyDataDir, "workspaces")
+    config.dbPath = chooseDbPath(legacyDataDir)
   }
 
   if (!config.reposDir) config.reposDir = path.join(config.dataDir, "repos")
   if (!config.workspacesDir) config.workspacesDir = path.join(config.dataDir, "workspaces")
-  if (!config.dbPath) config.dbPath = path.join(config.dataDir, "piconductor.sqlite")
+  if (!config.dbPath) config.dbPath = chooseDbPath(config.dataDir)
 
   mkdirSync(config.dataDir, { recursive: true })
   mkdirSync(config.reposDir, { recursive: true })

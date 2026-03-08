@@ -1,4 +1,4 @@
-# Pi Conductor TUI
+# Piductor
 
 Terminal-native orchestration for parallel Pi coding agents across git workspaces.
 
@@ -81,10 +81,12 @@ Plain text input sends a message to the selected workspace agent using the curre
 
 Config files are optional and merged in this order:
 
-1. User: `~/.config/piconductor/config.json`
-2. Project: `./piconductor.json`
+1. User: `~/.config/piductor/config.json`
+2. Project: `./piductor.json`
 
 Project config overrides user config.
+
+Legacy `piconductor` config/data paths are still detected for backward compatibility.
 
 ### Example
 
@@ -103,10 +105,10 @@ Project config overrides user config.
 
 ### Default storage paths
 
-- `dataDir`: `./.piconductor`
-- `reposDir`: `./.piconductor/repos`
-- `workspacesDir`: `./.piconductor/workspaces`
-- `dbPath`: `./.piconductor/piconductor.sqlite`
+- `dataDir`: `./.piductor`
+- `reposDir`: `./.piductor/repos`
+- `workspacesDir`: `./.piductor/workspaces`
+- `dbPath`: `./.piductor/piductor.sqlite`
 
 ## Project structure
 

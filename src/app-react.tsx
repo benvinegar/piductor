@@ -206,7 +206,7 @@ export class PiConductorApp {
   private rightSidebarCollapsed = false
   private isShuttingDown = false
 
-  private headerText = "Pi Conductor · loading..."
+  private headerText = "Piductor · loading..."
   private statusText = "repo       <none>"
   private conversationTabsText = " All changes · Review branch changes · Debugging"
   private conversationMarkdown = DEFAULT_CONVERSATION
@@ -309,7 +309,7 @@ export class PiConductorApp {
   }
 
   private async bootstrap() {
-    this.appendGlobalLog("Welcome to Pi Conductor (terminal prototype).")
+    this.appendGlobalLog("Welcome to Piductor (terminal prototype).")
     this.appendGlobalLog("Type /help to see commands.")
 
     await this.autoAddCurrentRepoIfPossible()
@@ -1351,7 +1351,7 @@ export class PiConductorApp {
 
     this.headerText = workspace
       ? `${repo?.name ?? "repo"}/${workspace.name} · ${workspace.branch} · mode=${this.sendMode} · ${mergeState}`
-      : `Pi Conductor · select a repo/workspace · mode=${this.sendMode}`
+      : `Piductor · select a repo/workspace · mode=${this.sendMode}`
 
     const statusLines = [
       `repo       ${repo ? `${repo.name} (#${repo.id})` : "<none>"}`,
