@@ -209,7 +209,7 @@ export function removeWorktree(params: { repoRoot: string; worktreePath: string;
 }
 
 export function getChangedFiles(worktreePath: string): string[] {
-  const output = runAllowError("git", ["-C", worktreePath, "status", "--short"], worktreePath)
+  const output = runAllowError("git", ["-C", worktreePath, "status", "--porcelain=v1"], worktreePath)
   const text = (output.stdout ?? "").trim()
   if (!text) return []
   return text.split(/\r?\n/)
@@ -228,8 +228,12 @@ export function getChangedFileStats(worktreePath: string): ChangedFileStat[] {
 
   for (const line of statusLines) {
     const status = line.slice(0, 2).trim() || "??"
-    const file = line.slice(3).trim()
+    const rawPath = line.slice(3).trim()
+    if (!rawPath) continue
+
+    const file = rawPath.includes(" -> ") ? (rawPath.split(" -> ").pop()?.trim() ?? rawPath) : rawPath
     if (!file) continue
+
     statusMap.set(file, status)
   }
 
