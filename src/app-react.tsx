@@ -38,6 +38,8 @@ import { parseWorkspaceNewArgs, workspaceNewUsage } from "./workspace-new"
 import { extractFirstUrl, parsePrCreateArgs, prCreateUsage } from "./pr-command"
 import { buildWorkspaceScriptEnv } from "./script-env"
 import { shouldStopExistingRun, stopSignalSequence } from "./run-policy"
+import { LOADING_TOKEN, renderLoadingTokens } from "./loading"
+import { sanitizePiStderrLine, shouldSurfacePiStderr } from "./pi-stderr"
 
 const GLOBAL_LOG_STREAM_ID = 0
 
@@ -212,6 +214,7 @@ export class PiConductorApp {
   private readonly assistantPartialByWorkspace = new Map<number, string>()
   private readonly thinkingPartialByWorkspace = new Map<number, string>()
   private readonly runProcessByWorkspace = new Map<number, ChildProcessWithoutNullStreams>()
+  private readonly agentTurnsInFlight = new Set<number>()
   private readonly expandedRepoIds = new Set<number>()
 
   private leftSidebarCollapsed = false
@@ -994,7 +997,12 @@ export class PiConductorApp {
     })
 
     agent.onStderr((line) => {
-      this.appendWorkspaceLog(workspaceId, `[pi:stderr] ${line}`)
+      const cleaned = sanitizePiStderrLine(line)
+      if (!shouldSurfacePiStderr(cleaned)) {
+        return
+      }
+
+      this.appendWorkspaceLog(workspaceId, `[pi:stderr] ${cleaned}`)
       this.refreshLogsPanel()
       this.emitSnapshot()
     })
@@ -1042,6 +1050,7 @@ export class PiConductorApp {
     }
 
     this.agentByWorkspace.delete(workspaceId)
+    this.agentTurnsInFlight.delete(workspaceId)
     this.store.setAgentState({
       workspaceId,
       status: "stopped",
@@ -1149,6 +1158,7 @@ export class PiConductorApp {
   private handleAgentEvent(workspaceId: number, event: Record<string, any>) {
     switch (event.type) {
       case "process_error":
+        this.agentTurnsInFlight.delete(workspaceId)
         this.store.setAgentState({
           workspaceId,
           status: "error",
@@ -1161,6 +1171,7 @@ export class PiConductorApp {
         break
 
       case "process_exit":
+        this.agentTurnsInFlight.delete(workspaceId)
         this.store.setAgentState({
           workspaceId,
           status: event.code === 0 ? "stopped" : "error",
@@ -1179,10 +1190,12 @@ export class PiConductorApp {
         break
 
       case "agent_start":
+        this.agentTurnsInFlight.add(workspaceId)
         this.appendWorkspaceLog(workspaceId, "[agent] started turn")
         break
 
       case "agent_end":
+        this.agentTurnsInFlight.delete(workspaceId)
         this.flushThinkingPartial(workspaceId)
         this.flushAssistantPartial(workspaceId)
         this.appendWorkspaceLog(workspaceId, "[agent] completed turn")
@@ -1210,6 +1223,7 @@ export class PiConductorApp {
 
       case "message_end":
       case "turn_end":
+        this.agentTurnsInFlight.delete(workspaceId)
         this.flushThinkingPartial(workspaceId)
         this.flushAssistantPartial(workspaceId)
         break
@@ -1605,6 +1619,12 @@ export class PiConductorApp {
     const mergeState =
       changedCount > 0 && runState === "idle" ? "Ready to merge" : changedCount > 0 ? "Changes pending" : "No changes yet"
 
+    const agentStatus = agent?.status ?? "stopped"
+    const turnInFlight = workspace ? this.agentTurnsInFlight.has(workspace.id) : false
+    const shouldShowAgentSpinner = agentStatus === "starting" || turnInFlight
+    const agentStatusLabel = turnInFlight ? "running" : agentStatus
+    const agentLoadingSuffix = shouldShowAgentSpinner ? ` ${LOADING_TOKEN}` : ""
+
     this.headerText = workspace
       ? `${repo?.name ?? "repo"}/${workspace.name} · ${workspace.branch} · mode=${this.sendMode} · ${mergeState}`
       : `Piductor · select a repo/workspace · mode=${this.sendMode}`
@@ -1613,7 +1633,7 @@ export class PiConductorApp {
       `repo       ${repo ? `${repo.name} (#${repo.id})` : "<none>"}`,
       `workspace  ${workspace ? `${workspace.name} (#${workspace.id})` : "<none>"}`,
       `branch     ${workspace?.branch ?? "<none>"}`,
-      `agent      ${agent?.status ?? "stopped"}${agent?.pid ? ` (pid ${agent.pid})` : ""}`,
+      `agent      ${agentStatusLabel}${agentLoadingSuffix}${agent?.pid ? ` (pid ${agent.pid})` : ""}`,
       `run        ${runState}`,
       `changes    ${changedCount} files · ${mergeState}`,
     ]
@@ -1787,6 +1807,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
   const [statusSectionCollapsed, setStatusSectionCollapsed] = useState(false)
   const [changesSectionCollapsed, setChangesSectionCollapsed] = useState(false)
   const [terminalSectionCollapsed, setTerminalSectionCollapsed] = useState(false)
+  const [loadingFrameIndex, setLoadingFrameIndex] = useState(0)
 
   const conversationSyntaxStyle = useMemo(
     () =>
@@ -1829,6 +1850,25 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
   const statusSectionHeader = formatSectionHeader("Workspace Status", statusSectionCollapsed, rightSectionHeaderWidth)
   const changesSectionHeader = formatSectionHeader("Changes", changesSectionCollapsed, rightSectionHeaderWidth)
   const terminalSectionHeader = formatSectionHeader("Run Terminal", terminalSectionCollapsed, rightSectionHeaderWidth)
+
+  const hasLoadingToken = snapshot.statusText.includes(LOADING_TOKEN)
+  useEffect(() => {
+    if (!hasLoadingToken) {
+      setLoadingFrameIndex(0)
+      return
+    }
+
+    const timer = setInterval(() => {
+      setLoadingFrameIndex((current) => current + 1)
+    }, 90)
+
+    return () => clearInterval(timer)
+  }, [hasLoadingToken])
+
+  const animatedStatusText = useMemo(
+    () => renderLoadingTokens(snapshot.statusText, loadingFrameIndex),
+    [snapshot.statusText, loadingFrameIndex],
+  )
 
   const workspaceTreeHasFocus = focusTarget === "workspace" || focusTarget === "repo"
 
@@ -2460,7 +2500,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
               {!statusSectionCollapsed && (
                 <text
                   id="pc-status-text"
-                  content={snapshot.statusText}
+                  content={animatedStatusText}
                   fg="#d1d5db"
                   wrapMode="word"
                   style={{
