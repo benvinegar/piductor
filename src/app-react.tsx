@@ -8,10 +8,9 @@ import {
   type CliRenderer,
   type KeyEvent,
   type SelectOption,
-  type SelectRenderable,
 } from "@opentui/core"
 import { createRoot, useKeyboard, useTerminalDimensions, type Root } from "@opentui/react"
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react"
 import { Store } from "./db"
 import { PiRpcProcess } from "./pi-rpc"
 import type { AppConfig, RepoRecord, SendMode, WorkspaceRecord } from "./types"
@@ -1113,9 +1112,8 @@ export class PiConductorApp {
 
       for (const workspace of repoWorkspaces) {
         const { added, removed } = this.getWorkspaceDiffTotals(workspace.worktreePath)
-        const marker = workspace.id === this.selectedWorkspaceId ? " •" : ""
         treeOptions.push({
-          name: `  > ${workspace.name} · ${workspace.branch} [+${added} -${removed}]${marker}`,
+          name: `  > ${workspace.name} · ${workspace.branch} [+${added} -${removed}]`,
           description: workspace.worktreePath,
           value: `${TREE_WORKSPACE_PREFIX}${repo.id}:${workspace.id}`,
         })
@@ -1543,37 +1541,6 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
   const [changesSectionCollapsed, setChangesSectionCollapsed] = useState(false)
   const [terminalSectionCollapsed, setTerminalSectionCollapsed] = useState(false)
 
-  const workspaceTreeRef = useRef<SelectRenderable | null>(null)
-
-  const selectOptionByMouse = (
-    event: { y: number; preventDefault: () => void },
-    selectRef: SelectRenderable | null,
-    options: SelectOption[],
-    onPick: (option: SelectOption) => void,
-  ) => {
-    if (!selectRef || options.length === 0) {
-      return
-    }
-
-    const relativeY = event.y - selectRef.y
-    if (relativeY < 0 || relativeY >= selectRef.height) {
-      return
-    }
-
-    const linesPerItem = 1
-    const row = Math.floor(relativeY / linesPerItem)
-    const scrollOffset = Number((selectRef as any).scrollOffset ?? 0)
-    const index = scrollOffset + row
-    const option = options[index]
-    if (!option) {
-      return
-    }
-
-    event.preventDefault()
-    ;(selectRef as any).setSelectedIndex?.(index)
-    onPick(option)
-  }
-
   const conversationSyntaxStyle = useMemo(
     () =>
       SyntaxStyle.fromStyles({
@@ -1615,6 +1582,18 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
   const statusSectionHeader = formatSectionHeader("Workspace Status", statusSectionCollapsed, rightSectionHeaderWidth)
   const changesSectionHeader = formatSectionHeader("Changes", changesSectionCollapsed, rightSectionHeaderWidth)
   const terminalSectionHeader = formatSectionHeader("Run Terminal", terminalSectionCollapsed, rightSectionHeaderWidth)
+
+  const workspaceTreeHasFocus = focusTarget === "workspace" || focusTarget === "repo"
+
+  const selectWorkspaceTreeIndex = (index: number, toggleRepo: boolean) => {
+    const option = snapshot.workspaceTreeOptions[index]
+    if (!option) {
+      return
+    }
+
+    app.selectWorkspaceTreeOption(option, toggleRepo)
+    setFocusTarget("workspace")
+  }
 
   useEffect(() => {
     if (snapshot.leftSidebarCollapsed && (focusTarget === "repo" || focusTarget === "workspace")) {
@@ -1690,6 +1669,38 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
       setWorkspaceTreeCollapsed(false)
       setFocusTarget("workspace")
       return
+    }
+
+    if (!snapshot.leftSidebarCollapsed && !workspaceTreeCollapsed && workspaceTreeHasFocus) {
+      if (key.name === "up" || key.name === "k") {
+        if (snapshot.workspaceTreeOptions.length > 0) {
+          key.preventDefault()
+          const total = snapshot.workspaceTreeOptions.length
+          const current = Math.max(0, snapshot.workspaceTreeSelectedIndex)
+          const next = (current - 1 + total) % total
+          selectWorkspaceTreeIndex(next, false)
+        }
+        return
+      }
+
+      if (key.name === "down" || key.name === "j") {
+        if (snapshot.workspaceTreeOptions.length > 0) {
+          key.preventDefault()
+          const total = snapshot.workspaceTreeOptions.length
+          const current = Math.max(0, snapshot.workspaceTreeSelectedIndex)
+          const next = (current + 1) % total
+          selectWorkspaceTreeIndex(next, false)
+        }
+        return
+      }
+
+      if (key.name === "return" || key.name === "linefeed") {
+        if (snapshot.workspaceTreeOptions.length > 0) {
+          key.preventDefault()
+          selectWorkspaceTreeIndex(snapshot.workspaceTreeSelectedIndex, true)
+        }
+        return
+      }
     }
 
     if (key.ctrl && key.name === "3") {
@@ -1911,34 +1922,74 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                     flexGrow: 1,
                   }}
                 >
-                  <select
-                    id="pc-workspace-tree-select"
-                    ref={(renderable) => {
-                      workspaceTreeRef.current = renderable
+                  <scrollbox
+                    id="pc-workspace-tree-scroll"
+                    border={false}
+                    scrollY
+                    scrollX={false}
+                    shouldFill
+                    style={{
+                      flexGrow: 1,
                     }}
-                    focused={focusTarget === "workspace" || focusTarget === "repo"}
-                    options={snapshot.workspaceTreeOptions}
-                    selectedIndex={snapshot.workspaceTreeSelectedIndex}
-                    height="100%"
-                    showDescription={false}
-                    wrapSelection
-                    selectedBackgroundColor="#1f2937"
-                    selectedTextColor="#e2e8f0"
-                    textColor="#cbd5e1"
-                    descriptionColor="#64748b"
-                    selectedDescriptionColor="#93c5fd"
-                    showScrollIndicator
-                    onMouseDown={(event) => {
-                      setWorkspaceTreeCollapsed(false)
-                      setFocusTarget("workspace")
-                      selectOptionByMouse(event, workspaceTreeRef.current, snapshot.workspaceTreeOptions, (option) => {
-                        app.selectWorkspaceTreeOption(option, true)
-                      })
+                    rootOptions={{
+                      backgroundColor: "transparent",
                     }}
-                    onChange={(_, option) => {
-                      app.selectWorkspaceTreeOption(option)
+                    wrapperOptions={{
+                      backgroundColor: "transparent",
                     }}
-                  />
+                    viewportOptions={{
+                      backgroundColor: "transparent",
+                    }}
+                    contentOptions={{
+                      backgroundColor: "transparent",
+                    }}
+                  >
+                    {snapshot.workspaceTreeOptions.map((option, index) => {
+                      const selected = index === snapshot.workspaceTreeSelectedIndex
+                      const value = String(option.value ?? "")
+                      const isRepoRow = value.startsWith(TREE_REPO_PREFIX)
+                      return (
+                        <box
+                          key={value}
+                          id={`pc-workspace-tree-row-${index}`}
+                          height={1}
+                          backgroundColor={selected ? "#1f2937" : "transparent"}
+                          onMouseDown={(event) => {
+                            event.preventDefault()
+                            setWorkspaceTreeCollapsed(false)
+                            setFocusTarget("workspace")
+                            app.selectWorkspaceTreeOption(option, true)
+                          }}
+                          style={{
+                            flexDirection: "row",
+                            alignItems: "center",
+                            flexShrink: 0,
+                          }}
+                        >
+                          <text
+                            id={`pc-workspace-tree-row-text-${index}`}
+                            content={option.name}
+                            fg={selected ? "#e2e8f0" : isRepoRow ? "#dbeafe" : "#cbd5e1"}
+                            wrapMode="none"
+                            style={{
+                              flexGrow: 1,
+                              flexShrink: 1,
+                            }}
+                          />
+                          <text
+                            id={`pc-workspace-tree-row-marker-${index}`}
+                            content={selected ? "●" : " "}
+                            fg={selected ? "#93c5fd" : "#475569"}
+                            selectable={false}
+                            style={{
+                              flexShrink: 0,
+                              marginLeft: 1,
+                            }}
+                          />
+                        </box>
+                      )
+                    })}
+                  </scrollbox>
                 </box>
               )}
             </box>
