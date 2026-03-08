@@ -18,7 +18,8 @@ Built with:
 - Surface thinking/tool/status events in a readable way
 - Run setup/run/archive scripts per workspace
 - Show per-file change stats (`+/-`) in a review panel
-- Collapse sidebars, resize side columns with mouse drag, and collapse right-panel sections
+- Collapse sidebars, resize side columns with mouse drag, and collapse sidebar sections
+- Navigate a unified workspace tree grouped by repo (`repo -> workspaces`) with expandable repo rows
 
 ## Install
 
@@ -62,8 +63,8 @@ Plain text input sends a message to the selected workspace agent using the curre
 
 ## Keyboard + mouse controls
 
-- `Ctrl+1` focus repo list
-- `Ctrl+2` focus workspace list
+- `Ctrl+1` focus workspace tree
+- `Ctrl+2` focus workspace tree (alias)
 - `Ctrl+3` focus composer
 - `Tab` cycle focus
 - `Ctrl+Left` collapse/expand left sidebar
@@ -73,7 +74,8 @@ Plain text input sends a message to the selected workspace agent using the curre
 - `Ctrl+C` exit
 - Click top-bar `[+] / [-]` toggles to collapse sidebars
 - Drag vertical separators to resize left/right columns
-- Click sidebar section headers to collapse/expand repositories, workspaces, status, changes, and run terminal
+- Click sidebar section headers to collapse/expand workspace tree, status, changes, and run terminal
+- Click repo rows in the workspace tree to expand/collapse nested workspaces
 
 ## Configuration
 

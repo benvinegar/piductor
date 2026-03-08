@@ -83,8 +83,9 @@ Use collapsible text headers instead of boxed sections.
 Current sections to keep stylistically consistent:
 
 Left sidebar:
-1. Repositories
-2. Workspaces
+1. Workspaces (single tree view)
+   - repo rows are expandable/collapsible
+   - nested workspace rows belong to their repo
 
 Right sidebar:
 1. Workspace Status
@@ -112,14 +113,15 @@ Right sidebar:
   - right: min `34`, default `52`, max `84`
   - center min width: `52`
 - Side panels use light horizontal padding (`paddingLeft: 1`, `paddingRight: 1`).
-- Repositories section keeps compact fixed height when expanded (currently `10`).
+- Left workspace tree section should fill available left-panel height when expanded.
 - Run Terminal section uses fixed compact height when expanded (currently `10`).
 
 ### Interaction consistency
 
 - Resizer remains the visual separator between columns (1-cell draggable bar).
 - Drag robustness uses body-level mouse handlers; preserve this approach.
-- `Ctrl+1` / `Ctrl+2` should reveal and focus repo/workspace lists even if those sections were collapsed.
+- `Ctrl+1` / `Ctrl+2` should reveal and focus the left workspace tree even if the section is collapsed.
+- Clicking a repo row in the workspace tree should expand/collapse that repo and keep workspace ownership visually explicit.
 - Any new mouse interaction should still have keyboard/command fallback where practical.
 
 ## Command surface (keep backward compatible)

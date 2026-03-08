@@ -68,8 +68,10 @@ export interface AppSnapshot {
   workspaces: WorkspaceRecord[]
   repoOptions: SelectOption[]
   workspaceOptions: SelectOption[]
+  workspaceTreeOptions: SelectOption[]
   repoSelectedIndex: number
   workspaceSelectedIndex: number
+  workspaceTreeSelectedIndex: number
   selectedRepoId: number | null
   selectedWorkspaceId: number | null
   sendMode: SendMode
@@ -165,6 +167,8 @@ function expandUserPath(value: string): string {
 }
 
 const DEFAULT_CONVERSATION = "_No conversation yet. Start an agent and send a prompt._"
+const TREE_REPO_PREFIX = "repo:"
+const TREE_WORKSPACE_PREFIX = "workspace:"
 
 export class PiConductorApp {
   private readonly renderer: CliRenderer
@@ -177,8 +181,10 @@ export class PiConductorApp {
 
   private repoOptions: SelectOption[] = []
   private workspaceOptions: SelectOption[] = []
+  private workspaceTreeOptions: SelectOption[] = []
   private repoSelectedIndex = 0
   private workspaceSelectedIndex = 0
+  private workspaceTreeSelectedIndex = 0
 
   private selectedRepoId: number | null = null
   private selectedWorkspaceId: number | null = null
@@ -190,6 +196,7 @@ export class PiConductorApp {
   private readonly assistantPartialByWorkspace = new Map<number, string>()
   private readonly thinkingPartialByWorkspace = new Map<number, string>()
   private readonly runProcessByWorkspace = new Map<number, ChildProcessWithoutNullStreams>()
+  private readonly expandedRepoIds = new Set<number>()
 
   private leftSidebarCollapsed = false
   private rightSidebarCollapsed = false
@@ -208,8 +215,10 @@ export class PiConductorApp {
     workspaces: [],
     repoOptions: [],
     workspaceOptions: [],
+    workspaceTreeOptions: [],
     repoSelectedIndex: 0,
     workspaceSelectedIndex: 0,
+    workspaceTreeSelectedIndex: 0,
     selectedRepoId: null,
     selectedWorkspaceId: null,
     sendMode: "prompt",
@@ -272,8 +281,10 @@ export class PiConductorApp {
       workspaces: [...this.workspaces],
       repoOptions: [...this.repoOptions],
       workspaceOptions: [...this.workspaceOptions],
+      workspaceTreeOptions: [...this.workspaceTreeOptions],
       repoSelectedIndex: this.repoSelectedIndex,
       workspaceSelectedIndex: this.workspaceSelectedIndex,
+      workspaceTreeSelectedIndex: this.workspaceTreeSelectedIndex,
       selectedRepoId: this.selectedRepoId,
       selectedWorkspaceId: this.selectedWorkspaceId,
       sendMode: this.sendMode,
@@ -343,11 +354,13 @@ export class PiConductorApp {
   public selectRepoOption(option: SelectOption | null) {
     if (!option) return
     this.selectedRepoId = Number(option.value)
+    this.expandedRepoIds.add(this.selectedRepoId)
     this.repoSelectedIndex = Math.max(
       0,
       this.repoOptions.findIndex((it) => Number(it.value) === this.selectedRepoId),
     )
     this.reloadWorkspaces()
+    this.rebuildWorkspaceTreeOptions(`${TREE_REPO_PREFIX}${this.selectedRepoId}`)
     this.refreshStatusPanel()
     this.refreshDiffPanel()
     this.refreshLogsPanel()
@@ -358,10 +371,21 @@ export class PiConductorApp {
   public selectWorkspaceOption(option: SelectOption | null) {
     if (!option) return
     this.selectedWorkspaceId = Number(option.value)
+    const workspace = this.store.getWorkspaceById(this.selectedWorkspaceId)
+    if (workspace) {
+      this.selectedRepoId = workspace.repoId
+      this.expandedRepoIds.add(workspace.repoId)
+      this.reloadRepos(workspace.repoId)
+    }
     this.workspaceSelectedIndex = Math.max(
       0,
       this.workspaceOptions.findIndex((it) => Number(it.value) === this.selectedWorkspaceId),
     )
+    if (workspace) {
+      this.rebuildWorkspaceTreeOptions(`${TREE_WORKSPACE_PREFIX}${workspace.repoId}:${workspace.id}`)
+    } else {
+      this.rebuildWorkspaceTreeOptions()
+    }
     this.refreshStatusPanel()
     this.refreshDiffPanel()
     this.refreshLogsPanel()
@@ -413,6 +437,7 @@ export class PiConductorApp {
         this.appendGlobalLog("UI: click [+]/[-] in top bar to collapse sidebars (or ctrl+left / ctrl+right).")
         this.appendGlobalLog("UI: drag the vertical separators to resize side columns.")
         this.appendGlobalLog("UI: click sidebar section headers to collapse/expand sections.")
+        this.appendGlobalLog("UI: click repo rows in Workspaces to expand/collapse nested workspaces.")
         return
       }
 
@@ -1021,6 +1046,126 @@ export class PiConductorApp {
     }
   }
 
+  private workspaceTreeValueForSelection(): string | null {
+    if (this.selectedWorkspaceId) {
+      const selectedWorkspace = this.store.getWorkspaceById(this.selectedWorkspaceId)
+      if (selectedWorkspace) {
+        return `${TREE_WORKSPACE_PREFIX}${selectedWorkspace.repoId}:${selectedWorkspace.id}`
+      }
+    }
+
+    if (this.selectedRepoId) {
+      return `${TREE_REPO_PREFIX}${this.selectedRepoId}`
+    }
+
+    return null
+  }
+
+  private getWorkspaceDiffTotals(worktreePath: string): { added: number; removed: number } {
+    try {
+      const stats = getChangedFileStats(worktreePath)
+      let added = 0
+      let removed = 0
+
+      for (const entry of stats) {
+        if (entry.added !== null) {
+          added += entry.added
+        }
+
+        if (entry.removed !== null) {
+          removed += entry.removed
+        }
+      }
+
+      return { added, removed }
+    } catch {
+      return { added: 0, removed: 0 }
+    }
+  }
+
+  private rebuildWorkspaceTreeOptions(preferredValue?: string | null) {
+    const repoIds = new Set(this.repos.map((repo) => repo.id))
+    for (const repoId of [...this.expandedRepoIds]) {
+      if (!repoIds.has(repoId)) {
+        this.expandedRepoIds.delete(repoId)
+      }
+    }
+
+    if (this.selectedRepoId && repoIds.has(this.selectedRepoId)) {
+      this.expandedRepoIds.add(this.selectedRepoId)
+    }
+
+    const treeOptions: SelectOption[] = []
+
+    for (const repo of this.repos) {
+      const repoWorkspaces = this.store.listWorkspaces(repo.id)
+      const expanded = this.expandedRepoIds.has(repo.id)
+
+      treeOptions.push({
+        name: `${expanded ? "▾" : "▸"} ${repo.id} - ${repo.name}`,
+        description: `${repoWorkspaces.length} workspace${repoWorkspaces.length === 1 ? "" : "s"} · ${repo.rootPath}`,
+        value: `${TREE_REPO_PREFIX}${repo.id}`,
+      })
+
+      if (!expanded) {
+        continue
+      }
+
+      for (const workspace of repoWorkspaces) {
+        const { added, removed } = this.getWorkspaceDiffTotals(workspace.worktreePath)
+        const marker = workspace.id === this.selectedWorkspaceId ? "•" : "·"
+        treeOptions.push({
+          name: `  > ${workspace.name} ${marker} ${workspace.branch} [+${added} -${removed}]`,
+          description: workspace.worktreePath,
+          value: `${TREE_WORKSPACE_PREFIX}${repo.id}:${workspace.id}`,
+        })
+      }
+    }
+
+    this.workspaceTreeOptions = treeOptions
+
+    const selectedWorkspaceValue = this.workspaceTreeValueForSelection()
+    const selectedRepoValue = this.selectedRepoId ? `${TREE_REPO_PREFIX}${this.selectedRepoId}` : null
+    const targetValue = preferredValue ?? selectedWorkspaceValue ?? selectedRepoValue
+
+    let selectedIndex = targetValue ? treeOptions.findIndex((option) => String(option.value) === targetValue) : -1
+
+    if (selectedIndex === -1 && selectedRepoValue) {
+      selectedIndex = treeOptions.findIndex((option) => String(option.value) === selectedRepoValue)
+    }
+
+    this.workspaceTreeSelectedIndex = Math.max(0, selectedIndex)
+  }
+
+  private parseWorkspaceTreeOption(option: SelectOption):
+    | { type: "repo"; repoId: number }
+    | { type: "workspace"; repoId: number; workspaceId: number }
+    | null {
+    const raw = String(option.value ?? "")
+
+    if (raw.startsWith(TREE_WORKSPACE_PREFIX)) {
+      const parts = raw.slice(TREE_WORKSPACE_PREFIX.length).split(":")
+      const repoId = Number(parts[0])
+      const workspaceId = Number(parts[1])
+
+      if (Number.isInteger(repoId) && Number.isInteger(workspaceId)) {
+        return { type: "workspace", repoId, workspaceId }
+      }
+
+      return null
+    }
+
+    if (raw.startsWith(TREE_REPO_PREFIX)) {
+      const repoId = Number(raw.slice(TREE_REPO_PREFIX.length))
+      if (Number.isInteger(repoId)) {
+        return { type: "repo", repoId }
+      }
+      return null
+    }
+
+    return null
+  }
+
   private reloadRepos(preferredRepoId?: number | null) {
     this.repos = this.store.listRepos()
 
@@ -1028,6 +1173,9 @@ export class PiConductorApp {
       this.selectedRepoId = null
       this.repoOptions = []
       this.repoSelectedIndex = 0
+      this.workspaceTreeOptions = []
+      this.workspaceTreeSelectedIndex = 0
+      this.expandedRepoIds.clear()
       return
     }
 
@@ -1045,6 +1193,8 @@ export class PiConductorApp {
       0,
       this.repoOptions.findIndex((option) => Number(option.value) === this.selectedRepoId),
     )
+
+    this.rebuildWorkspaceTreeOptions()
   }
 
   private reloadWorkspaces(preferredWorkspaceId?: number | null) {
@@ -1053,6 +1203,7 @@ export class PiConductorApp {
       this.selectedWorkspaceId = null
       this.workspaceOptions = []
       this.workspaceSelectedIndex = 0
+      this.rebuildWorkspaceTreeOptions()
       return
     }
 
@@ -1062,6 +1213,7 @@ export class PiConductorApp {
       this.selectedWorkspaceId = null
       this.workspaceOptions = []
       this.workspaceSelectedIndex = 0
+      this.rebuildWorkspaceTreeOptions()
       return
     }
 
@@ -1090,11 +1242,65 @@ export class PiConductorApp {
       0,
       this.workspaceOptions.findIndex((option) => Number(option.value) === this.selectedWorkspaceId),
     )
+
+    this.rebuildWorkspaceTreeOptions()
+  }
+
+  public selectWorkspaceTreeOption(option: SelectOption | null, toggleRepo = false) {
+    if (!option) return
+
+    const parsed = this.parseWorkspaceTreeOption(option)
+    if (!parsed) {
+      return
+    }
+
+    if (parsed.type === "repo") {
+      const wasSelected = this.selectedRepoId === parsed.repoId
+      const wasExpanded = this.expandedRepoIds.has(parsed.repoId)
+
+      this.selectedRepoId = parsed.repoId
+      if (toggleRepo && wasSelected && wasExpanded) {
+        this.expandedRepoIds.delete(parsed.repoId)
+      } else {
+        this.expandedRepoIds.add(parsed.repoId)
+      }
+
+      this.reloadRepos(parsed.repoId)
+      this.reloadWorkspaces()
+      this.rebuildWorkspaceTreeOptions(`${TREE_REPO_PREFIX}${parsed.repoId}`)
+    } else {
+      this.selectedRepoId = parsed.repoId
+      this.expandedRepoIds.add(parsed.repoId)
+      this.reloadRepos(parsed.repoId)
+      this.reloadWorkspaces(parsed.workspaceId)
+      this.selectedWorkspaceId = parsed.workspaceId
+      this.workspaceSelectedIndex = Math.max(
+        0,
+        this.workspaceOptions.findIndex((it) => Number(it.value) === parsed.workspaceId),
+      )
+      this.rebuildWorkspaceTreeOptions(`${TREE_WORKSPACE_PREFIX}${parsed.repoId}:${parsed.workspaceId}`)
+    }
+
+    this.refreshStatusPanel()
+    this.refreshDiffPanel()
+    this.refreshLogsPanel()
+    this.refreshTerminalPanel()
+    this.emitSnapshot()
   }
 
   private getSelectedWorkspace(): WorkspaceRecord | null {
     if (!this.selectedWorkspaceId) return null
-    return this.store.getWorkspaceById(this.selectedWorkspaceId)
+
+    const workspace = this.store.getWorkspaceById(this.selectedWorkspaceId)
+    if (!workspace) {
+      return null
+    }
+
+    if (this.selectedRepoId && workspace.repoId !== this.selectedRepoId) {
+      return null
+    }
+
+    return workspace
   }
 
   private appendGlobalLog(message: string) {
@@ -1332,14 +1538,12 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
   const [leftColumnWidth, setLeftColumnWidth] = useState(36)
   const [rightColumnWidth, setRightColumnWidth] = useState(52)
   const [resizeState, setResizeState] = useState<ResizeState | null>(null)
-  const [repoSectionCollapsed, setRepoSectionCollapsed] = useState(false)
-  const [workspaceSectionCollapsed, setWorkspaceSectionCollapsed] = useState(false)
+  const [workspaceTreeCollapsed, setWorkspaceTreeCollapsed] = useState(false)
   const [statusSectionCollapsed, setStatusSectionCollapsed] = useState(false)
   const [changesSectionCollapsed, setChangesSectionCollapsed] = useState(false)
   const [terminalSectionCollapsed, setTerminalSectionCollapsed] = useState(false)
 
-  const repoSelectRef = useRef<SelectRenderable | null>(null)
-  const workspaceSelectRef = useRef<SelectRenderable | null>(null)
+  const workspaceTreeRef = useRef<SelectRenderable | null>(null)
 
   const selectOptionByMouse = (
     event: { y: number; preventDefault: () => void },
@@ -1356,7 +1560,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
       return
     }
 
-    const linesPerItem = 2
+    const linesPerItem = 1
     const row = Math.floor(relativeY / linesPerItem)
     const scrollOffset = Number((selectRef as any).scrollOffset ?? 0)
     const index = scrollOffset + row
@@ -1405,8 +1609,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
   const rightVisible = !snapshot.rightSidebarCollapsed
 
   const leftSectionHeaderWidth = Math.max(12, leftColumnWidth - 2)
-  const repoSectionHeader = formatSectionHeader("Repositories", repoSectionCollapsed, leftSectionHeaderWidth)
-  const workspaceSectionHeader = formatSectionHeader("Workspaces", workspaceSectionCollapsed, leftSectionHeaderWidth)
+  const workspaceTreeHeader = formatSectionHeader("Workspaces", workspaceTreeCollapsed, leftSectionHeaderWidth)
 
   const rightSectionHeaderWidth = Math.max(12, rightColumnWidth - 2)
   const statusSectionHeader = formatSectionHeader("Workspace Status", statusSectionCollapsed, rightSectionHeaderWidth)
@@ -1420,15 +1623,10 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
   }, [snapshot.leftSidebarCollapsed, focusTarget])
 
   useEffect(() => {
-    if (repoSectionCollapsed && focusTarget === "repo") {
-      setFocusTarget(workspaceSectionCollapsed ? "input" : "workspace")
-      return
+    if (workspaceTreeCollapsed && (focusTarget === "repo" || focusTarget === "workspace")) {
+      setFocusTarget("input")
     }
-
-    if (workspaceSectionCollapsed && focusTarget === "workspace") {
-      setFocusTarget(repoSectionCollapsed ? "input" : "repo")
-    }
-  }, [repoSectionCollapsed, workspaceSectionCollapsed, focusTarget])
+  }, [workspaceTreeCollapsed, focusTarget])
 
   useEffect(() => {
     if (resizeState?.edge === "left" && !leftVisible) {
@@ -1484,22 +1682,12 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
   const rightResizerActive = resizeState?.edge === "right"
 
   useKeyboard((key: KeyEvent) => {
-    if (key.ctrl && key.name === "1") {
+    if (key.ctrl && (key.name === "1" || key.name === "2")) {
       key.preventDefault()
       if (snapshot.leftSidebarCollapsed) {
         app.toggleLeftSidebar()
       }
-      setRepoSectionCollapsed(false)
-      setFocusTarget("repo")
-      return
-    }
-
-    if (key.ctrl && key.name === "2") {
-      key.preventDefault()
-      if (snapshot.leftSidebarCollapsed) {
-        app.toggleLeftSidebar()
-      }
-      setWorkspaceSectionCollapsed(false)
+      setWorkspaceTreeCollapsed(false)
       setFocusTarget("workspace")
       return
     }
@@ -1526,11 +1714,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
       key.preventDefault()
       const tabTargets: FocusTarget[] = ["input"]
 
-      if (!snapshot.leftSidebarCollapsed && !repoSectionCollapsed) {
-        tabTargets.push("repo")
-      }
-
-      if (!snapshot.leftSidebarCollapsed && !workspaceSectionCollapsed) {
+      if (!snapshot.leftSidebarCollapsed && !workspaceTreeCollapsed) {
         tabTargets.push("workspace")
       }
 
@@ -1688,20 +1872,20 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
             }}
           >
             <box
-              id="pc-repo-section"
-              height={repoSectionCollapsed ? 1 : 10}
+              id="pc-workspace-tree-section"
+              shouldFill={!workspaceTreeCollapsed}
               style={{
                 flexDirection: "column",
+                flexGrow: workspaceTreeCollapsed ? 0 : 1,
                 flexShrink: 0,
-                marginBottom: 1,
               }}
             >
               <box
-                id="pc-repo-header"
+                id="pc-workspace-tree-header"
                 height={1}
-                backgroundColor={repoSectionCollapsed ? "#1a2332" : "#182031"}
+                backgroundColor={workspaceTreeCollapsed ? "#1a2332" : "#182031"}
                 onMouseDown={() => {
-                  setRepoSectionCollapsed((prev) => !prev)
+                  setWorkspaceTreeCollapsed((prev) => !prev)
                 }}
                 style={{
                   flexShrink: 0,
@@ -1710,89 +1894,17 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                 }}
               >
                 <text
-                  id="pc-repo-header-text"
-                  content={repoSectionHeader}
+                  id="pc-workspace-tree-header-text"
+                  content={workspaceTreeHeader}
                   fg="#bfdbfe"
                   wrapMode="none"
                   selectable={false}
                 />
               </box>
 
-              {!repoSectionCollapsed && (
+              {!workspaceTreeCollapsed && (
                 <box
-                  id="pc-repo-body"
-                  height={8}
-                  style={{
-                    marginTop: 1,
-                    flexShrink: 0,
-                  }}
-                >
-                  <select
-                    id="pc-repo-select"
-                    ref={(renderable) => {
-                      repoSelectRef.current = renderable
-                    }}
-                    focused={focusTarget === "repo"}
-                    options={snapshot.repoOptions}
-                    selectedIndex={snapshot.repoSelectedIndex}
-                    height="100%"
-                    showDescription
-                    wrapSelection
-                    selectedBackgroundColor="#1d4ed8"
-                    selectedTextColor="#e2e8f0"
-                    textColor="#cbd5e1"
-                    descriptionColor="#64748b"
-                    selectedDescriptionColor="#93c5fd"
-                    showScrollIndicator
-                    onMouseDown={(event) => {
-                      setRepoSectionCollapsed(false)
-                      setFocusTarget("repo")
-                      selectOptionByMouse(event, repoSelectRef.current, snapshot.repoOptions, (option) => {
-                        app.selectRepoOption(option)
-                      })
-                    }}
-                    onChange={(_, option) => {
-                      app.selectRepoOption(option)
-                    }}
-                  />
-                </box>
-              )}
-            </box>
-
-            <box
-              id="pc-workspace-section"
-              shouldFill={!workspaceSectionCollapsed}
-              style={{
-                flexDirection: "column",
-                flexGrow: workspaceSectionCollapsed ? 0 : 1,
-                flexShrink: 0,
-              }}
-            >
-              <box
-                id="pc-workspace-header"
-                height={1}
-                backgroundColor={workspaceSectionCollapsed ? "#1a2332" : "#182031"}
-                onMouseDown={() => {
-                  setWorkspaceSectionCollapsed((prev) => !prev)
-                }}
-                style={{
-                  flexShrink: 0,
-                  flexDirection: "row",
-                  alignItems: "center",
-                }}
-              >
-                <text
-                  id="pc-workspace-header-text"
-                  content={workspaceSectionHeader}
-                  fg="#bfdbfe"
-                  wrapMode="none"
-                  selectable={false}
-                />
-              </box>
-
-              {!workspaceSectionCollapsed && (
-                <box
-                  id="pc-workspace-body"
+                  id="pc-workspace-tree-body"
                   shouldFill
                   style={{
                     marginTop: 1,
@@ -1800,31 +1912,31 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                   }}
                 >
                   <select
-                    id="pc-workspace-select"
+                    id="pc-workspace-tree-select"
                     ref={(renderable) => {
-                      workspaceSelectRef.current = renderable
+                      workspaceTreeRef.current = renderable
                     }}
-                    focused={focusTarget === "workspace"}
-                    options={snapshot.workspaceOptions}
-                    selectedIndex={snapshot.workspaceSelectedIndex}
+                    focused={focusTarget === "workspace" || focusTarget === "repo"}
+                    options={snapshot.workspaceTreeOptions}
+                    selectedIndex={snapshot.workspaceTreeSelectedIndex}
                     height="100%"
-                    showDescription
+                    showDescription={false}
                     wrapSelection
-                    selectedBackgroundColor="#065f46"
-                    selectedTextColor="#ecfeff"
+                    selectedBackgroundColor="#1f2937"
+                    selectedTextColor="#e2e8f0"
                     textColor="#cbd5e1"
                     descriptionColor="#64748b"
-                    selectedDescriptionColor="#a7f3d0"
+                    selectedDescriptionColor="#93c5fd"
                     showScrollIndicator
                     onMouseDown={(event) => {
-                      setWorkspaceSectionCollapsed(false)
+                      setWorkspaceTreeCollapsed(false)
                       setFocusTarget("workspace")
-                      selectOptionByMouse(event, workspaceSelectRef.current, snapshot.workspaceOptions, (option) => {
-                        app.selectWorkspaceOption(option)
+                      selectOptionByMouse(event, workspaceTreeRef.current, snapshot.workspaceTreeOptions, (option) => {
+                        app.selectWorkspaceTreeOption(option, true)
                       })
                     }}
                     onChange={(_, option) => {
-                      app.selectWorkspaceOption(option)
+                      app.selectWorkspaceTreeOption(option)
                     }}
                   />
                 </box>
