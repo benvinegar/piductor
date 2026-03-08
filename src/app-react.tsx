@@ -1889,7 +1889,8 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
     }
 
     app.selectWorkspaceTreeOption(option, toggleRepo)
-    setFocusTarget("workspace")
+    const parsed = parseWorkspaceTreeValue(option.value)
+    setFocusTarget(parsed?.type === "workspace" ? "input" : "workspace")
   }
 
   useEffect(() => {
@@ -2187,7 +2188,8 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                           onMouseDown={(event) => {
                             event.preventDefault()
                             setWorkspaceTreeCollapsed(false)
-                            setFocusTarget("workspace")
+                            const parsed = parseWorkspaceTreeValue(option.value)
+                            setFocusTarget(parsed?.type === "workspace" ? "input" : "workspace")
                             app.selectWorkspaceTreeOption(option, true)
                           }}
                           style={{
