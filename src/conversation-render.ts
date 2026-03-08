@@ -24,7 +24,32 @@ export function formatUserMessageBox(content: string): string {
 
 export function formatAssistantMessageRail(content: string): string {
   const lines = content.split(/\r?\n/)
-  return lines.map((line) => `> ${line.length > 0 ? line : "\u00A0"}`).join("\n")
+  const quoted: string[] = []
+  let inCodeFence = false
+
+  for (const line of lines) {
+    const trimmed = line.trim()
+
+    if (trimmed.startsWith("```")) {
+      quoted.push(`> ${line}`)
+      inCodeFence = !inCodeFence
+      continue
+    }
+
+    if (inCodeFence) {
+      quoted.push(`> ${line}`)
+      continue
+    }
+
+    if (line.length === 0) {
+      quoted.push(`>`)
+      continue
+    }
+
+    quoted.push(`> ${line}  `)
+  }
+
+  return quoted.join("\n")
 }
 
 export function toConversationMarkdown(lines: string[]): string {

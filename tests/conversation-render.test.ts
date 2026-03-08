@@ -18,11 +18,18 @@ describe("conversation-render", () => {
     expect(box).toContain("╰")
   })
 
-  it("formats assistant output as markdown blockquote lines", () => {
+  it("formats assistant output as markdown blockquote lines with hard line breaks", () => {
     const rail = formatAssistantMessageRail("first line\nsecond line")
     const lines = rail.split("\n")
 
-    expect(lines).toEqual(["> first line", "> second line"])
+    expect(lines).toEqual(["> first line  ", "> second line  "])
+  })
+
+  it("preserves extra blank lines in assistant output", () => {
+    const rail = formatAssistantMessageRail("line A\n\nline B")
+    const lines = rail.split("\n")
+
+    expect(lines).toEqual(["> line A  ", ">", "> line B  "])
   })
 
   it("keeps markdown tokens in assistant output and separates message blocks", () => {
