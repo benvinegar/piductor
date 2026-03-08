@@ -488,6 +488,7 @@ export class PiConductorApp {
         this.appendGlobalLog("  /workspace select <id|name>")
         this.appendGlobalLog("  /agent start [model]")
         this.appendGlobalLog("  /agent stop")
+        this.appendGlobalLog("  /agent list")
         this.appendGlobalLog("  /mode <prompt|steer|follow_up>")
         this.appendGlobalLog("  /pr create [--dry-run]")
         this.appendGlobalLog("  /run [command]  (or config scripts.run)")
@@ -782,7 +783,12 @@ export class PiConductorApp {
           return
         }
 
-        this.appendGlobalLog("Usage: /agent start [model] | /agent stop")
+        if (sub === "list") {
+          this.logAgentRegistry()
+          return
+        }
+
+        this.appendGlobalLog("Usage: /agent start [model] | /agent stop | /agent list")
         return
       }
 
@@ -1641,6 +1647,27 @@ export class PiConductorApp {
     this.sendModeState = setWorkspaceSendMode(this.sendModeState, this.selectedWorkspaceId, mode)
   }
 
+  private logAgentRegistry() {
+    const agents = this.store.listAgents()
+    if (agents.length === 0) {
+      this.appendGlobalLog("No agent records yet.")
+      return
+    }
+
+    this.appendGlobalLog("Agents:")
+    for (const agent of agents) {
+      const workspace = this.store.getWorkspaceById(agent.workspaceId)
+      const repo = workspace ? this.store.getRepoById(workspace.repoId) : null
+      const label = workspace ? `${repo?.name ?? "repo"}/${workspace.name}` : `workspace#${agent.workspaceId}`
+      const lastEvent = agent.lastEventAt ?? "-"
+      const started = agent.startedAt ?? "-"
+
+      this.appendGlobalLog(
+        `  #${agent.workspaceId} ${label} · ${agent.status}${agent.pid ? ` (pid ${agent.pid})` : ""} · session=${agent.sessionId ?? "-"} · started=${started} · last=${lastEvent}`,
+      )
+    }
+  }
+
   private appendGlobalLog(message: string) {
     this.appendLog(GLOBAL_LOG_STREAM_ID, message)
   }
@@ -1709,11 +1736,13 @@ export class PiConductorApp {
       ? `${repo?.name ?? "repo"}/${workspace.name} · ${workspace.branch} · mode=${activeSendMode} · ${mergeState}`
       : `Piductor · select a repo/workspace · mode=${activeSendMode}`
 
+    const activityTime = agent?.lastEventAt ?? agent?.startedAt ?? agent?.stoppedAt ?? "<none>"
     const statusLines = [
       `repo       ${repo ? `${repo.name} (#${repo.id})` : "<none>"}`,
       `workspace  ${workspace ? `${workspace.name} (#${workspace.id})` : "<none>"}`,
       `branch     ${workspace?.branch ?? "<none>"}`,
       `agent      ${agentStatusLabel}${agent?.pid ? ` (pid ${agent.pid})` : ""}`,
+      `activity   ${activityTime}`,
       `run        ${runState}`,
       `changes    ${changedCount} files · ${mergeState}`,
     ]

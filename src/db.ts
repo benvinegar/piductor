@@ -1,6 +1,7 @@
 import { mkdirSync } from "node:fs"
 import path from "node:path"
 import { Database } from "bun:sqlite"
+import { nextAgentTimingState } from "./agent-state"
 import type { AgentRecord, AgentRuntimeStatus, RepoRecord, WorkspaceRecord } from "./types"
 
 function nowIso() {
@@ -38,6 +39,7 @@ function mapAgent(row: any): AgentRecord {
     sessionId: row.session_id ? String(row.session_id) : null,
     startedAt: row.started_at ? String(row.started_at) : null,
     stoppedAt: row.stopped_at ? String(row.stopped_at) : null,
+    lastEventAt: row.last_event_at ? String(row.last_event_at) : null,
     lastError: row.last_error ? String(row.last_error) : null,
   }
 }
@@ -83,10 +85,17 @@ export class Store {
         session_id TEXT,
         started_at TEXT,
         stopped_at TEXT,
+        last_event_at TEXT,
         last_error TEXT,
         FOREIGN KEY(workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
       );
     `)
+
+    const agentColumns = this.db.query(`PRAGMA table_info(agents)`).all() as Array<{ name: string }>
+    const hasLastEventAt = agentColumns.some((column) => String(column.name) === "last_event_at")
+    if (!hasLastEventAt) {
+      this.db.exec(`ALTER TABLE agents ADD COLUMN last_event_at TEXT`)
+    }
   }
 
   close() {
@@ -232,12 +241,24 @@ export class Store {
   getAgent(workspaceId: number): AgentRecord | null {
     const row = this.db
       .query(`
-        SELECT workspace_id, status, pid, model, session_id, started_at, stopped_at, last_error
+        SELECT workspace_id, status, pid, model, session_id, started_at, stopped_at, last_event_at, last_error
         FROM agents
         WHERE workspace_id = ?
       `)
       .get(workspaceId)
     return row ? mapAgent(row) : null
+  }
+
+  listAgents(): AgentRecord[] {
+    const rows = this.db
+      .query(`
+        SELECT workspace_id, status, pid, model, session_id, started_at, stopped_at, last_event_at, last_error
+        FROM agents
+        ORDER BY workspace_id ASC
+      `)
+      .all()
+
+    return rows.map(mapAgent)
   }
 
   setAgentState(params: {
@@ -246,16 +267,29 @@ export class Store {
     pid?: number | null
     model?: string | null
     sessionId?: string | null
+    lastEventAt?: string | null
     lastError?: string | null
   }) {
+    const now = nowIso()
     const current = this.getAgent(params.workspaceId)
-    const startedAt = params.status === "running" || params.status === "starting" ? nowIso() : current?.startedAt ?? null
-    const stoppedAt = params.status === "stopped" || params.status === "error" ? nowIso() : null
+    const timing = nextAgentTimingState({
+      current: current
+        ? {
+            status: current.status,
+            startedAt: current.startedAt,
+            stoppedAt: current.stoppedAt,
+            lastEventAt: current.lastEventAt,
+          }
+        : null,
+      status: params.status,
+      nowIso: now,
+      lastEventAt: params.lastEventAt,
+    })
 
     this.db
       .query(`
-        INSERT INTO agents(workspace_id, status, pid, model, session_id, started_at, stopped_at, last_error)
-        VALUES(?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO agents(workspace_id, status, pid, model, session_id, started_at, stopped_at, last_event_at, last_error)
+        VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(workspace_id) DO UPDATE SET
           status = excluded.status,
           pid = excluded.pid,
@@ -263,6 +297,7 @@ export class Store {
           session_id = excluded.session_id,
           started_at = excluded.started_at,
           stopped_at = excluded.stopped_at,
+          last_event_at = excluded.last_event_at,
           last_error = excluded.last_error
       `)
       .run(
@@ -271,8 +306,9 @@ export class Store {
         params.pid ?? null,
         params.model ?? null,
         params.sessionId ?? null,
-        startedAt,
-        stoppedAt,
+        timing.startedAt,
+        timing.stoppedAt,
+        timing.lastEventAt,
         params.lastError ?? null,
       )
   }

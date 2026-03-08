@@ -28,6 +28,7 @@ export interface AgentRecord {
   sessionId: string | null
   startedAt: string | null
   stoppedAt: string | null
+  lastEventAt: string | null
   lastError: string | null
 }
 
