@@ -1863,6 +1863,19 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
     ? `${composerSpinner || "•"} Thinking${snapshot.thinkingPreview ? ` · ${snapshot.thinkingPreview}` : "…"}`
     : ""
 
+  const statusRows = snapshot.statusText
+    .split("\n")
+    .map((line) => {
+      const match = line.match(/^(\S+)\s+(.*)$/)
+      if (!match) {
+        return { label: "", value: line }
+      }
+      return {
+        label: match[1] ?? "",
+        value: match[2] ?? "",
+      }
+    })
+
   const workspaceTreeHasFocus = focusTarget === "workspace" || focusTarget === "repo"
 
   const selectWorkspaceTreeIndex = (index: number, toggleRepo: boolean) => {
@@ -2511,15 +2524,47 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
               </box>
 
               {!statusSectionCollapsed && (
-                <text
-                  id="pc-status-text"
-                  content={snapshot.statusText}
-                  fg="#d1d5db"
-                  wrapMode="word"
+                <box
+                  id="pc-status-rows"
                   style={{
+                    flexDirection: "column",
                     marginTop: 1,
                   }}
-                />
+                >
+                  {statusRows.map((row, index) => (
+                    <box
+                      key={`${row.label}-${index}`}
+                      id={`pc-status-row-${index}`}
+                      height={1}
+                      style={{
+                        flexDirection: "row",
+                        alignItems: "center",
+                        flexShrink: 0,
+                      }}
+                    >
+                      <text
+                        id={`pc-status-label-${index}`}
+                        content={row.label ? `${row.label.padEnd(10)} ` : ""}
+                        fg="#93c5fd"
+                        wrapMode="none"
+                        selectable={false}
+                        style={{
+                          flexShrink: 0,
+                        }}
+                      />
+                      <text
+                        id={`pc-status-value-${index}`}
+                        content={row.value}
+                        fg="#d1d5db"
+                        wrapMode="none"
+                        style={{
+                          flexGrow: 1,
+                          flexShrink: 1,
+                        }}
+                      />
+                    </box>
+                  ))}
+                </box>
               )}
             </box>
 
