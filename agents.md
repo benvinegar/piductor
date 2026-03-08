@@ -146,6 +146,18 @@ If you add/rename commands, update:
 3. App still starts with `bun run dev`
 4. README and help text match behavior changes
 5. If deps change, keep lockfiles in sync (`bun.lock` and `package-lock.json`)
+6. Agent performs a manual UI smoke test in tmux and confirms behavior (not just static checks)
+
+## Agent-led QA in tmux (required)
+
+For any UI/interaction change, run your own verification in the live TUI session:
+
+- Use tmux pane controls to interact with the running app (`tmux send-keys`, `tmux capture-pane`).
+- Validate the specific interaction changed (e.g. click/keyboard selection, collapse/expand, resize).
+- Confirm no obvious regressions in adjacent flows (focus, command input, sidebar toggles).
+- Report what was tested and the observed result in the final summary.
+
+Do not rely only on code inspection/typecheck/tests for TUI behavior changes.
 
 ## Style preferences
 
