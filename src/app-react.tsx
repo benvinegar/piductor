@@ -108,6 +108,7 @@ export interface AppSnapshot {
   statusText: string
   conversationTabsText: string
   conversationMarkdown: string
+  diffFileCount: number
   diffText: string
   terminalText: string
   footerText: string
@@ -235,6 +236,7 @@ export class PiConductorApp {
   private statusText = "repo       <none>"
   private conversationTabsText = " All changes · Review branch changes · Debugging"
   private conversationMarkdown = DEFAULT_CONVERSATION
+  private diffFileCount = 0
   private diffText = "No workspace selected."
   private terminalText = "No workspace selected."
   private footerText = ""
@@ -260,6 +262,7 @@ export class PiConductorApp {
     statusText: this.statusText,
     conversationTabsText: this.conversationTabsText,
     conversationMarkdown: this.conversationMarkdown,
+    diffFileCount: this.diffFileCount,
     diffText: this.diffText,
     terminalText: this.terminalText,
     footerText: this.footerText,
@@ -334,6 +337,7 @@ export class PiConductorApp {
       statusText: this.statusText,
       conversationTabsText: this.conversationTabsText,
       conversationMarkdown: this.conversationMarkdown,
+      diffFileCount: this.diffFileCount,
       diffText: this.diffText,
       terminalText: this.terminalText,
       footerText: this.footerText,
@@ -1710,26 +1714,30 @@ export class PiConductorApp {
   private refreshDiffPanel() {
     const workspace = this.getSelectedWorkspace()
     if (!workspace) {
+      this.diffFileCount = 0
       this.diffText = "No workspace selected."
       return
     }
 
     try {
       const stats = getChangedFileStats(workspace.worktreePath)
+      this.diffFileCount = stats.length
+
       if (stats.length === 0) {
         this.diffText = "Working tree clean."
         return
       }
 
       const lines = stats.slice(0, 120).map((entry) => {
-        const plus = entry.added === null ? "--" : `+${entry.added}`
-        const minus = entry.removed === null ? "--" : `-${entry.removed}`
-        return `${plus.padStart(5)} ${minus.padStart(5)}  ${entry.path}`
+        const plus = entry.added === null ? "+?" : `+${entry.added}`
+        const minus = entry.removed === null ? "-?" : `-${entry.removed}`
+        return `${plus} ${minus} ${entry.path}`
       })
 
       const extra = stats.length > lines.length ? `\n... ${stats.length - lines.length} more files` : ""
-      this.diffText = `Changes ${stats.length}\n\n${lines.join("\n")}${extra}`
+      this.diffText = `${lines.join("\n")}${extra}`
     } catch (error) {
+      this.diffFileCount = 0
       this.diffText = `Failed to read changes: ${safeErr(error)}`
     }
   }
@@ -1810,7 +1818,11 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
 
   const rightSectionHeaderWidth = Math.max(12, rightColumnWidth - 2)
   const statusSectionHeader = formatSectionHeader("Workspace Status", statusSectionCollapsed, rightSectionHeaderWidth)
-  const changesSectionHeader = formatSectionHeader("Changes", changesSectionCollapsed, rightSectionHeaderWidth)
+  const changesSectionHeader = formatSectionHeader(
+    `Changes (${snapshot.diffFileCount})`,
+    changesSectionCollapsed,
+    rightSectionHeaderWidth,
+  )
   const terminalSectionHeader = formatSectionHeader("Run Terminal", terminalSectionCollapsed, rightSectionHeaderWidth)
 
   const centerColumnWidth = Math.max(
