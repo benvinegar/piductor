@@ -65,7 +65,7 @@ bun run dev
 /run mode [concurrent|nonconcurrent]
 /test [command]
 /status
-/diff
+/diff [open|close|next|prev|hunk <next|prev>|mode [unified|split]|refresh]
 /ui left|right|toggle
 ```
 
@@ -88,6 +88,7 @@ Plain text input sends a message to the selected workspace agent using the curre
 - Drag vertical separators to resize left/right columns
 - Click sidebar section headers to collapse/expand workspace tree, status, changes, and run terminal
 - Click repo rows in the workspace tree to expand/collapse nested workspaces
+- In diff review mode (when focus is not in composer): `m` toggle unified/split, `n`/`p` next/prev file, `[`/`]` prev/next hunk, `q` close review
 
 ## Configuration
 

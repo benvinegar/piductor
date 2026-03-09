@@ -291,3 +291,41 @@ export function getDiff(worktreePath: string, maxLines = 220): string {
 
   return [...lines.slice(0, maxLines), `... (${lines.length - maxLines} more lines)`].join("\n")
 }
+
+export function getDiffForFile(worktreePath: string, filePath: string, maxLines = 500): string {
+  const tracked = runAllowError(
+    "git",
+    ["-C", worktreePath, "--no-pager", "diff", "--no-color", "--unified=3", "--", filePath],
+    worktreePath,
+  )
+
+  let text = String(tracked.stdout ?? "").trimEnd()
+
+  if (!text) {
+    const untracked = runAllowError(
+      "git",
+      [
+        "-C",
+        worktreePath,
+        "--no-pager",
+        "diff",
+        "--no-color",
+        "--unified=3",
+        "--no-index",
+        "--",
+        "/dev/null",
+        filePath,
+      ],
+      worktreePath,
+    )
+    text = String(untracked.stdout ?? "").trimEnd()
+  }
+
+  if (!text) {
+    return ""
+  }
+
+  const lines = text.split(/\r?\n/)
+  if (lines.length <= maxLines) return text
+  return [...lines.slice(0, maxLines), `... (${lines.length - maxLines} more lines)`].join("\n")
+}
