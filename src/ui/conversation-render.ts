@@ -38,8 +38,108 @@ export function formatUserMessageBox(content: string): string {
   return content.trimEnd()
 }
 
+function expandInlineBullets(line: string): string[] {
+  const leading = line.match(/^\s*/)?.[0] ?? ""
+  const trimmed = line.trim()
+
+  if (!trimmed.includes(" - ")) {
+    return [line]
+  }
+
+  const withIntro = trimmed.match(/^(.*?:)\s+-\s+(.+)$/)
+  if (withIntro) {
+    const intro = withIntro[1]?.trimEnd() ?? ""
+    const rest = withIntro[2] ?? ""
+    const items = rest
+      .split(/\s+-\s+/)
+      .map((item) => item.trim())
+      .filter((item) => item.length > 0)
+
+    if (items.length >= 1) {
+      return [`${leading}${intro}`, ...items.map((item) => `${leading}- ${item}`)]
+    }
+  }
+
+  if (/^-\s+.+\s+-\s+.+/.test(trimmed)) {
+    const parts = trimmed
+      .replace(/^-\s+/, "")
+      .split(/\s+-\s+/)
+      .map((item) => item.trim())
+      .filter((item) => item.length > 0)
+
+    if (parts.length >= 2) {
+      return parts.map((item) => `${leading}- ${item}`)
+    }
+  }
+
+  return [line]
+}
+
+function normalizeAssistantMessage(content: string): string {
+  const sourceLines = content.split(/\r?\n/).map((line) => line.trimEnd())
+  const expanded: string[] = []
+  let inCodeFence = false
+
+  for (const line of sourceLines) {
+    const trimmed = line.trimStart()
+    if (trimmed.startsWith("```")) {
+      inCodeFence = !inCodeFence
+      expanded.push(line)
+      continue
+    }
+
+    if (inCodeFence) {
+      expanded.push(line)
+      continue
+    }
+
+    expanded.push(...expandInlineBullets(line))
+  }
+
+  const normalized: string[] = []
+  inCodeFence = false
+
+  for (const line of expanded) {
+    const trimmed = line.trimStart()
+    const isFence = trimmed.startsWith("```")
+
+    if (isFence) {
+      inCodeFence = !inCodeFence
+      normalized.push(line)
+      continue
+    }
+
+    if (line.length === 0) {
+      if (normalized[normalized.length - 1] !== "") {
+        normalized.push("")
+      }
+      continue
+    }
+
+    const isBullet = /^[-*•]\s+/.test(trimmed)
+    const previous = normalized[normalized.length - 1] ?? ""
+    const previousIsBullet = /^[-*•]\s+/.test(previous.trimStart())
+
+    if (!inCodeFence && isBullet && previous.length > 0 && !previousIsBullet) {
+      normalized.push("")
+    }
+
+    normalized.push(line)
+  }
+
+  while (normalized[0] === "") {
+    normalized.shift()
+  }
+
+  while (normalized[normalized.length - 1] === "") {
+    normalized.pop()
+  }
+
+  return normalized.join("\n")
+}
+
 export function formatAssistantMessageRail(content: string): string {
-  return content
+  return normalizeAssistantMessage(content)
 }
 
 function extractTaggedContent(line: string, tag: string): string | null {

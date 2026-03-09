@@ -25,9 +25,9 @@ describe("conversation-render", () => {
     ])
   })
 
-  it("passes assistant markdown through without forced quote markers", () => {
+  it("keeps assistant markdown and adds spacing before bullet lists", () => {
     const output = formatAssistantMessageRail("**bold**\n- item")
-    expect(output).toBe("**bold**\n- item")
+    expect(output).toBe("**bold**\n\n- item")
   })
 
   it("uses blank lines between messages instead of divider lines", () => {
@@ -65,6 +65,17 @@ describe("conversation-render", () => {
 
     expect(rendered).toContain("Line one")
     expect(rendered).toContain("\n\nLine three")
+  })
+
+  it("expands inline bullets into separate lines", () => {
+    const rendered = toConversationMarkdown([
+      "[12:00:01] Done — I read README.md.",
+      "[12:00:02] Top lines are: - # Modem - Developer-focused CRM",
+    ])
+
+    expect(rendered).toContain("Top lines are:")
+    expect(rendered).toContain("\n\n- # Modem")
+    expect(rendered).toContain("\n- Developer-focused CRM")
   })
 
   it("renders thinking and tool activity as a persistent timeline", () => {
