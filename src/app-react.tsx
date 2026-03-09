@@ -47,6 +47,8 @@ import { LOADING_TOKEN, renderLoadingTokens } from "./loading"
 import { sanitizePiStderrLine, shouldSurfacePiStderr } from "./pi-stderr"
 import { parseAgentCommand, resolveRestartModel } from "./agent-control"
 import { killProcessByPid } from "./process-kill"
+import { UiFlushScheduler } from "./ui-flush-scheduler"
+import { consumeBufferedLines } from "./stream-buffer"
 import { DEFAULT_CONVERSATION, toConversationMarkdown as renderConversationMarkdown } from "./conversation-render"
 import {
   clearDraftForWorkspace,
@@ -74,6 +76,7 @@ const MAX_LEFT_WIDTH = 72
 const MIN_RIGHT_WIDTH = 34
 const MAX_RIGHT_WIDTH = 84
 const MIN_CENTER_WIDTH = 52
+const MAX_STREAM_REMAINDER_CHARS = 8192
 
 function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value))
@@ -256,6 +259,12 @@ export class PiConductorApp {
   private readonly agentTurnsInFlight = new Set<number>()
   private readonly expandedRepoIds = new Set<number>()
   private readonly lastActivityByWorkspace = new Map<number, string>()
+  private readonly uiFlushScheduler = new UiFlushScheduler(45, () => {
+    this.refreshStatusPanel()
+    this.refreshLogsPanel()
+    this.refreshTerminalPanel()
+    this.emitSnapshot()
+  })
 
   private leftSidebarCollapsed = false
   private rightSidebarCollapsed = false
@@ -1105,8 +1114,7 @@ export class PiConductorApp {
       }
 
       this.appendWorkspaceLog(workspaceId, `[pi:stderr] ${cleaned}`)
-      this.refreshLogsPanel()
-      this.emitSnapshot()
+      this.scheduleUiFlush()
     })
 
     try {
@@ -1246,18 +1254,18 @@ export class PiConductorApp {
     const attach = (stream: NodeJS.ReadableStream, prefix: string) => {
       let buffer = ""
       stream.on("data", (chunk: any) => {
-        buffer += String(chunk)
-        while (true) {
-          const i = buffer.indexOf("\n")
-          if (i === -1) break
-          const line = buffer.slice(0, i).trimEnd()
-          buffer = buffer.slice(i + 1)
-          if (line) {
-            this.appendRunLog(workspaceId, `[${label}/${prefix}] ${line}`)
-            if (this.selectedWorkspaceId === workspaceId) {
-              this.refreshTerminalPanel()
-              this.emitSnapshot()
-            }
+        const consumed = consumeBufferedLines(buffer, String(chunk), MAX_STREAM_REMAINDER_CHARS)
+        buffer = consumed.remainder
+
+        for (const rawLine of consumed.lines) {
+          const line = rawLine.trimEnd()
+          if (!line) {
+            continue
+          }
+
+          this.appendRunLog(workspaceId, `[${label}/${prefix}] ${line}`)
+          if (this.selectedWorkspaceId === workspaceId) {
+            this.scheduleUiFlush()
           }
         }
       })
@@ -1390,25 +1398,31 @@ export class PiConductorApp {
       }
     }
 
-    this.reloadWorkspaces(this.selectedWorkspaceId)
-    this.refreshStatusPanel()
-    this.refreshLogsPanel()
-    this.refreshTerminalPanel()
-    this.emitSnapshot()
+    const eventType = String(event.type ?? "")
+    const shouldThrottle =
+      eventType === "message_update" ||
+      eventType === "turn_start" ||
+      eventType === "agent_start" ||
+      eventType === "tool_execution_start" ||
+      eventType === "extension_ui_request"
+
+    if (shouldThrottle) {
+      this.scheduleUiFlush()
+      return
+    }
+
+    this.refreshAllAndEmit()
   }
 
   private appendAssistantStream(workspaceId: number, delta: string) {
     const current = this.assistantPartialByWorkspace.get(workspaceId) ?? ""
-    const combined = current + delta
-    const parts = combined.split(/\r?\n/)
+    const consumed = consumeBufferedLines(current, delta, MAX_STREAM_REMAINDER_CHARS)
 
-    for (let i = 0; i < parts.length - 1; i++) {
-      const line = parts[i] ?? ""
+    for (const line of consumed.lines) {
       this.appendWorkspaceLog(workspaceId, line)
     }
 
-    const remainder = parts[parts.length - 1] ?? ""
-    this.assistantPartialByWorkspace.set(workspaceId, remainder)
+    this.assistantPartialByWorkspace.set(workspaceId, consumed.remainder)
   }
 
   private appendThinkingStream(workspaceId: number, delta: string) {
@@ -1752,6 +1766,20 @@ export class PiConductorApp {
     this.appendGlobalLog(message)
   }
 
+  private scheduleUiFlush() {
+    this.uiFlushScheduler.schedule()
+  }
+
+  private refreshAllAndEmit() {
+    this.uiFlushScheduler.cancel()
+    this.reloadWorkspaces(this.selectedWorkspaceId)
+    this.refreshStatusPanel()
+    this.refreshDiffPanel()
+    this.refreshLogsPanel()
+    this.refreshTerminalPanel()
+    this.emitSnapshot()
+  }
+
   private appendGlobalLog(message: string) {
     this.appendLog(GLOBAL_LOG_STREAM_ID, message)
   }
@@ -1909,6 +1937,7 @@ export class PiConductorApp {
       await this.stopAgent(workspaceId, { force: false, reason: "app shutdown" })
     }
 
+    this.uiFlushScheduler.cancel()
     this.store.close()
     this.root.unmount()
     this.renderer.destroy()
