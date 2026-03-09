@@ -2552,11 +2552,21 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
     rightSectionHeaderWidth,
   )
   const terminalSectionHeader = formatSectionHeader("Run Terminal", terminalSectionCollapsed, rightSectionHeaderWidth)
+  const lobbyAscii = [
+    "██████╗ ██╗██████╗ ██╗   ██╗ ██████╗████████╗ ██████╗ ██████╗",
+    "██╔══██╗██║██╔══██╗██║   ██║██╔════╝╚══██╔══╝██╔═══██╗██╔══██╗",
+    "██████╔╝██║██║  ██║██║   ██║██║        ██║   ██║   ██║██████╔╝",
+    "██╔═══╝ ██║██║  ██║██║   ██║██║        ██║   ██║   ██║██╔══██╗",
+    "██║     ██║██████╔╝╚██████╔╝╚██████╗   ██║   ╚██████╔╝██║  ██║",
+    "╚═╝     ╚═╝╚═════╝  ╚═════╝  ╚═════╝   ╚═╝    ╚═════╝ ╚═╝  ╚═╝",
+  ]
 
   const centerColumnWidth = Math.max(
     24,
     terminalWidth - (leftVisible ? leftColumnWidth + 1 : 0) - (rightVisible ? rightColumnWidth + 1 : 0),
   )
+  const lobbyContentHeight = lobbyAscii.length + 2
+  const lobbyTopPadding = Math.max(7, Math.floor((terminalHeight - lobbyContentHeight) / 2) - 1)
   const diffModalWidth = clamp(Math.floor(terminalWidth * 0.9), 72, Math.max(72, terminalWidth - 4))
   const diffModalHeight = clamp(Math.floor(terminalHeight * 0.85), 16, Math.max(16, terminalHeight - 3))
   const headerActions = "/help · /mode · /ui"
@@ -2568,14 +2578,6 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
     centerTitle.length > maxTitleWidth ? `${centerTitle.slice(0, Math.max(0, maxTitleWidth - 1))}…` : centerTitle
   const fillerLen = Math.max(1, headerWidth - truncatedTitle.length - headerActions.length - 2)
   const conversationHeaderText = `${truncatedTitle} ${"─".repeat(fillerLen)} ${headerActions}`
-  const lobbyAscii = [
-    "██████╗ ██╗██████╗ ██╗   ██╗ ██████╗████████╗ ██████╗ ██████╗",
-    "██╔══██╗██║██╔══██╗██║   ██║██╔════╝╚══██╔══╝██╔═══██╗██╔══██╗",
-    "██████╔╝██║██║  ██║██║   ██║██║        ██║   ██║   ██║██████╔╝",
-    "██╔═══╝ ██║██║  ██║██║   ██║██║        ██║   ██║   ██║██╔══██╗",
-    "██║     ██║██████╔╝╚██████╔╝╚██████╗   ██║   ╚██████╔╝██║  ██║",
-    "╚═╝     ╚═╝╚═════╝  ╚═════╝  ╚═════╝   ╚═╝    ╚═════╝ ╚═╝  ╚═╝",
-  ]
 
   const hasLoadingToken = snapshot.agentBusy
   useEffect(() => {
@@ -3272,14 +3274,27 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
               shouldFill
               style={{
                 flexDirection: "column",
-                justifyContent: "center",
-                alignItems: "center",
               }}
             >
-              {lobbyAscii.map((line, index) => (
-                <text key={`pc-lobby-ascii-${index}`} content={line} fg={index < 2 ? "#93c5fd" : "#dbeafe"} wrapMode="none" />
-              ))}
-              <text content="Select a workspace to continue" fg="#94a3b8" wrapMode="none" style={{ marginTop: 1 }} />
+              <box
+                id="pc-lobby-center-content"
+                style={{
+                  flexDirection: "column",
+                  alignItems: "center",
+                  flexShrink: 0,
+                  marginTop: lobbyTopPadding,
+                }}
+              >
+                {lobbyAscii.map((line, index) => (
+                  <text
+                    key={`pc-lobby-ascii-${index}`}
+                    content={line}
+                    fg={index < 2 ? "#93c5fd" : "#dbeafe"}
+                    wrapMode="none"
+                  />
+                ))}
+                <text content="Select a workspace to continue" fg="#94a3b8" wrapMode="none" style={{ marginTop: 1 }} />
+              </box>
             </box>
           ) : (
             <>
