@@ -3259,6 +3259,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
 
         <box
           id="pc-center"
+          key={workspaceSelectionMode ? "pc-center-lobby" : "pc-center-active"}
           shouldFill
           backgroundColor="#100f13"
           style={{
@@ -3270,6 +3271,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
         >
           {workspaceSelectionMode ? (
             <box
+              key="pc-lobby-center"
               id="pc-lobby-center"
               shouldFill
               style={{
@@ -3297,7 +3299,14 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
               </box>
             </box>
           ) : (
-            <>
+            <box
+              key="pc-active-center"
+              id="pc-active-center"
+              shouldFill
+              style={{
+                flexDirection: "column",
+              }}
+            >
           <box
             id="pc-conversation-box"
             backgroundColor="#100f13"
@@ -3433,7 +3442,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
               width="100%"
             />
           </box>
-            </>
+            </box>
           )}
         </box>
 
