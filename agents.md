@@ -62,6 +62,19 @@ Treat this as a deliberate split:
 
 Future UI changes should match the current minimal style language.
 
+## Product framing: terminal-native desktop UX
+
+Treat this app like a **desktop-style interface implemented in a terminal**.
+
+- Prefer interaction patterns from desktop apps (modal overlays, focused detail panes, explicit selection states).
+- When OpenTUI provides a specialized renderable (e.g. `diff`, `code`, `line-number`), prefer that over plain markdown/text emulation.
+- Keep keyboard-first parity for all major interactions (mouse is additive, not required).
+- Design for terminal constraints:
+  - fixed-width cells,
+  - limited color fidelity,
+  - no pixel-perfect layering assumptions.
+- Use modal overlays for high-focus tasks (e.g. detailed review) rather than replacing primary layout context unless explicitly requested.
+
 ### Border philosophy
 
 - Avoid superfluous nested boxes.
