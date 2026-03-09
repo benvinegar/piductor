@@ -2607,8 +2607,6 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
     24,
     terminalWidth - (leftVisible ? leftColumnWidth + 1 : 0) - (rightVisible ? rightColumnWidth + 1 : 0),
   )
-  const lobbyContentHeight = lobbyAscii.length + 2
-  const lobbyTopPadding = Math.max(7, Math.floor((terminalHeight - lobbyContentHeight) / 2) - 1)
   const commandModalWidth = clamp(Math.floor(terminalWidth * 0.76), 64, Math.max(64, terminalWidth - 6))
   const commandModalHeight = clamp(Math.floor(terminalHeight * 0.72), 14, Math.max(14, terminalHeight - 4))
   const diffModalWidth = clamp(Math.floor(terminalWidth * 0.9), 72, Math.max(72, terminalWidth - 4))
@@ -2622,15 +2620,11 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
     centerTitle.length > maxTitleWidth ? `${centerTitle.slice(0, Math.max(0, maxTitleWidth - 1))}…` : centerTitle
   const fillerLen = Math.max(1, headerWidth - truncatedTitle.length - headerActions.length - 2)
   const conversationHeaderText = `${truncatedTitle} ${"─".repeat(fillerLen)} ${headerActions}`
-  const lobbyAsciiWidth = lobbyAscii.reduce((max, line) => Math.max(max, line.length), 0)
-  const centerOffset = leftVisible ? leftColumnWidth + 1 : 0
-  const rawLobbyLeftPadding = Math.max(0, Math.floor((terminalWidth - lobbyAsciiWidth) / 2) - centerOffset)
-  const lobbyLeftPadding = clamp(rawLobbyLeftPadding, 0, 48)
   const lobbySubtitle = "Select a workspace to continue"
-  const rawLobbySubtitlePadding = Math.max(0, Math.floor((terminalWidth - lobbySubtitle.length) / 2) - centerOffset)
-  const lobbySubtitlePadding = clamp(rawLobbySubtitlePadding, 0, 56)
-  const lobbyAsciiLines = lobbyAscii.map((line) => `${" ".repeat(lobbyLeftPadding)}${line}`)
-  const lobbySubtitleLine = `${" ".repeat(lobbySubtitlePadding)}${lobbySubtitle}`
+  const lobbyAsciiWidth = lobbyAscii.reduce((max, line) => Math.max(max, line.length), 0)
+  const lobbyContentWidth = Math.max(lobbyAsciiWidth, lobbySubtitle.length)
+  const lobbyContentHeight = lobbyAscii.length + 2
+  const lobbyHorizontalNudge = Math.floor((leftVisible ? leftColumnWidth + 1 : 0) / 2)
 
   const hasLoadingToken = snapshot.agentBusy
   useEffect(() => {
@@ -3413,17 +3407,25 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
               shouldFill
               style={{
                 flexDirection: "column",
+                flexGrow: 1,
+                flexShrink: 1,
               }}
             >
               <box
                 id="pc-lobby-center-content"
+                position="absolute"
+                left="50%"
+                top="50%"
+                width={lobbyContentWidth}
+                height={lobbyContentHeight}
+                marginLeft={-Math.floor(lobbyContentWidth / 2) - lobbyHorizontalNudge}
+                marginTop={-Math.floor(lobbyContentHeight / 2)}
                 style={{
                   flexDirection: "column",
-                  flexShrink: 0,
-                  marginTop: lobbyTopPadding,
+                  alignItems: "center",
                 }}
               >
-                {lobbyAsciiLines.map((line, index) => (
+                {lobbyAscii.map((line, index) => (
                   <text
                     key={`pc-lobby-ascii-${index}`}
                     content={line}
@@ -3431,7 +3433,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                     wrapMode="none"
                   />
                 ))}
-                <text content={lobbySubtitleLine} fg="#94a3b8" wrapMode="none" style={{ marginTop: 1 }} />
+                <text content={lobbySubtitle} fg="#94a3b8" wrapMode="none" style={{ marginTop: 1 }} />
               </box>
             </box>
           ) : (
