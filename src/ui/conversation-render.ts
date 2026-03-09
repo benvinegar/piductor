@@ -7,7 +7,15 @@ export type ConversationBlock =
       text: string
     }
   | {
-      kind: "markdown"
+      kind: "assistant"
+      markdown: string
+    }
+  | {
+      kind: "activity"
+      text: string
+    }
+  | {
+      kind: "notice"
       markdown: string
     }
 
@@ -81,7 +89,7 @@ export function toConversationBlocks(lines: string[]): ConversationBlock[] {
   const flushAssistant = () => {
     if (pendingAssistant.length === 0) return
     rendered.push({
-      kind: "markdown",
+      kind: "assistant",
       markdown: formatAssistantMessageRail(pendingAssistant.join("\n")),
     })
     pendingAssistant = []
@@ -90,8 +98,8 @@ export function toConversationBlocks(lines: string[]): ConversationBlock[] {
   const flushTimeline = () => {
     if (pendingTimeline.length === 0) return
     rendered.push({
-      kind: "markdown",
-      markdown: pendingTimeline.join("\n"),
+      kind: "activity",
+      text: pendingTimeline.join("\n"),
     })
     pendingTimeline = []
     toolSectionOpen = false
@@ -185,14 +193,14 @@ export function toConversationBlocks(lines: string[]): ConversationBlock[] {
       flushAssistant()
       flushTimeline()
       const content = line.replace(/^\[pi:stderr\]\s*/, "")
-      rendered.push({ kind: "markdown", markdown: `> ⚠️ ${content}` })
+      rendered.push({ kind: "notice", markdown: `> ⚠️ ${content}` })
       continue
     }
 
     if (line.startsWith("ERROR:")) {
       flushAssistant()
       flushTimeline()
-      rendered.push({ kind: "markdown", markdown: `> ❌ ${line}` })
+      rendered.push({ kind: "notice", markdown: `> ❌ ${line}` })
       continue
     }
 
@@ -200,14 +208,14 @@ export function toConversationBlocks(lines: string[]): ConversationBlock[] {
       flushAssistant()
       flushTimeline()
       const content = line.replace(/^\[system\]\s*/, "")
-      rendered.push({ kind: "markdown", markdown: `> ℹ️ ${content}` })
+      rendered.push({ kind: "notice", markdown: `> ℹ️ ${content}` })
       continue
     }
 
     if (line.startsWith("[extension-ui]")) {
       flushAssistant()
       flushTimeline()
-      rendered.push({ kind: "markdown", markdown: "> ℹ️ Agent requested extension UI input." })
+      rendered.push({ kind: "notice", markdown: "> ℹ️ Agent requested extension UI input." })
       continue
     }
 
@@ -238,7 +246,17 @@ export function toConversationMarkdown(lines: string[]): string {
 
   return (
     blocks
-      .map((block) => (block.kind === "user" ? `**You:** ${block.text}` : block.markdown))
+      .map((block) => {
+        if (block.kind === "user") {
+          return `**You:** ${block.text}`
+        }
+
+        if (block.kind === "activity") {
+          return block.text
+        }
+
+        return block.markdown
+      })
       .filter((value) => value.trim().length > 0)
       .join("\n\n") || DEFAULT_CONVERSATION
   )

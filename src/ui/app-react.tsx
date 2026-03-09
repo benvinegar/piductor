@@ -4262,6 +4262,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
               ) : (
                 conversationBlocks.map((block, index) => {
                   const isLast = index === conversationBlocks.length - 1
+
                   if (block.kind === "user") {
                     return (
                       <box
@@ -4279,6 +4280,22 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                         }}
                       >
                         <text content={block.text} fg="#e2e8f0" wrapMode="word" width="100%" />
+                      </box>
+                    )
+                  }
+
+                  if (block.kind === "activity") {
+                    return (
+                      <box
+                        key={`pc-conversation-activity-${index}`}
+                        width="100%"
+                        style={{
+                          flexDirection: "column",
+                          flexShrink: 0,
+                          marginBottom: isLast ? 0 : 1,
+                        }}
+                      >
+                        <text content={block.text} fg="#64748b" wrapMode="word" width="100%" />
                       </box>
                     )
                   }

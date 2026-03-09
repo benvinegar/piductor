@@ -68,18 +68,29 @@ describe("conversation-render", () => {
   })
 
   it("renders thinking and tool activity as a persistent timeline", () => {
-    const rendered = toConversationMarkdown([
+    const lines = [
       "[12:00:00] [thinking] I found the stale value source",
       "[12:00:01] [tool] Read `ingest-client.ts`",
       "[12:00:02] [tool] Search `clientName`",
       "[12:00:03] Final answer",
-    ])
+    ]
+
+    const rendered = toConversationMarkdown(lines)
+    const blocks = toConversationBlocks(lines)
 
     expect(rendered).toContain("• I found the stale value source")
     expect(rendered).toContain("• Explored")
     expect(rendered).toContain("└ Read `ingest-client.ts`")
     expect(rendered).toContain("└ Search `clientName`")
     expect(rendered).toContain("Final answer")
+    expect(blocks[0]).toEqual({
+      kind: "activity",
+      text: "• I found the stale value source\n\n• Explored\n  └ Read `ingest-client.ts`\n  └ Search `clientName`",
+    })
+    expect(blocks[1]).toEqual({
+      kind: "assistant",
+      markdown: "Final answer",
+    })
   })
 
   it("renders tool errors inside the explored section", () => {
