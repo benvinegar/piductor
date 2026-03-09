@@ -4400,13 +4400,23 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
               }}
             >
               {conversationBlocks.length === 0 ? (
-                <markdown
-                  id="pc-conversation-markdown-empty"
-                  content={centerMarkdown}
-                  syntaxStyle={conversationSyntaxStyle}
-                  conceal
+                <box
+                  id="pc-conversation-empty"
                   width="100%"
-                />
+                  style={{
+                    flexDirection: "column",
+                    flexShrink: 0,
+                    paddingLeft: 1,
+                  }}
+                >
+                  <markdown
+                    id="pc-conversation-markdown-empty"
+                    content={centerMarkdown}
+                    syntaxStyle={conversationSyntaxStyle}
+                    conceal
+                    width="100%"
+                  />
+                </box>
               ) : (
                 conversationBlocks.map((block, index) => {
                   const isLast = index === conversationBlocks.length - 1
@@ -4441,6 +4451,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                           flexDirection: "column",
                           flexShrink: 0,
                           marginBottom: isLast ? 0 : 1,
+                          paddingLeft: 1,
                         }}
                       >
                         <text content={block.text} fg={colors.activityText} wrapMode="word" width="100%" />
@@ -4456,6 +4467,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                         flexDirection: "column",
                         flexShrink: 0,
                         marginBottom: isLast ? 0 : 1,
+                        paddingLeft: 1,
                       }}
                     >
                       <markdown content={block.markdown} syntaxStyle={conversationSyntaxStyle} conceal width="100%" />
@@ -4536,47 +4548,62 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
               </box>
             )}
 
-            <text
-              id="pc-compose-hint"
-              content={`${hasLoadingToken ? `${composerSpinner} ` : ""}Composer · /help · /mode · /theme`}
-              fg={hasLoadingToken ? colors.accent : colors.textMuted}
-              style={{
-                flexShrink: 0,
-              }}
-            />
-
-            <textarea
-              id="pc-input"
-              ref={composerRef}
-              focused={focusTarget === "input"}
+            <box
+              id="pc-input-shell"
+              width="100%"
+              backgroundColor={colors.userRowBackground}
               onMouseDown={() => {
                 setFocusTarget("input")
               }}
-              placeholder="Ask the selected Pi workspace to do something…"
-              onSubmit={() => {
-                const submitted = composerRef.current?.plainText ?? ""
-                draftStateRef.current = clearDraftForWorkspace(draftStateRef.current, snapshot.selectedWorkspaceId)
-                composerRef.current?.clear()
-                setComposerText("")
-                void app.submitInput(submitted)
+              style={{
+                flexDirection: "column",
+                flexShrink: 0,
+                paddingLeft: 1,
+                paddingRight: 1,
               }}
-              keyBindings={[
-                { name: "return", action: "submit" },
-                { name: "linefeed", action: "submit" },
-                { name: "return", shift: true, action: "newline" },
-                { name: "linefeed", shift: true, action: "newline" },
-                { name: "j", ctrl: true, action: "newline" },
-              ]}
-              textColor={colors.inputText}
-              focusedTextColor={colors.inputText}
-              placeholderColor={colors.inputPlaceholder}
-              backgroundColor="transparent"
-              focusedBackgroundColor="transparent"
-              cursorColor={colors.inputCursor}
-              wrapMode="word"
-              height={3}
-              width="100%"
-            />
+            >
+              <text
+                id="pc-compose-hint"
+                content={`${hasLoadingToken ? `${composerSpinner} ` : ""}Composer · /help · /mode · /theme`}
+                fg={hasLoadingToken ? colors.accent : colors.textMuted}
+                style={{
+                  flexShrink: 0,
+                }}
+              />
+
+              <textarea
+                id="pc-input"
+                ref={composerRef}
+                focused={focusTarget === "input"}
+                onMouseDown={() => {
+                  setFocusTarget("input")
+                }}
+                placeholder="Ask the selected Pi workspace to do something…"
+                onSubmit={() => {
+                  const submitted = composerRef.current?.plainText ?? ""
+                  draftStateRef.current = clearDraftForWorkspace(draftStateRef.current, snapshot.selectedWorkspaceId)
+                  composerRef.current?.clear()
+                  setComposerText("")
+                  void app.submitInput(submitted)
+                }}
+                keyBindings={[
+                  { name: "return", action: "submit" },
+                  { name: "linefeed", action: "submit" },
+                  { name: "return", shift: true, action: "newline" },
+                  { name: "linefeed", shift: true, action: "newline" },
+                  { name: "j", ctrl: true, action: "newline" },
+                ]}
+                textColor={colors.inputText}
+                focusedTextColor={colors.inputText}
+                placeholderColor={colors.inputPlaceholder}
+                backgroundColor="transparent"
+                focusedBackgroundColor="transparent"
+                cursorColor={colors.inputCursor}
+                wrapMode="word"
+                height={3}
+                width="100%"
+              />
+            </box>
           </box>
             </box>
           )}
