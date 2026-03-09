@@ -4,7 +4,11 @@ import { summarizeToolCall, summarizeToolError } from "../src/ui/agent-activity"
 describe("agent activity formatting", () => {
   it("formats common tool calls", () => {
     expect(summarizeToolCall("read", { path: "src/app.tsx" })).toBe("Read `src/app.tsx`")
-    expect(summarizeToolCall("bash", { command: "npm test --silent" })).toBe("Run `npm test --silent`")
+    expect(summarizeToolCall("read", { path: "/home/bentlegen/Projects/tui-experiment/src/ui/app-react.tsx" })).toBe(
+      "Read `…/src/ui/app-react.tsx`",
+    )
+    expect(summarizeToolCall("bash", { command: "npm test --silent" })).toBe("Run tests")
+    expect(summarizeToolCall("bash", { command: "rg -n conversation src" })).toBe("Search project files")
     expect(summarizeToolCall("todo", { action: "claim", id: "TODO-1" })).toBe("Todo claim TODO-1")
   })
 

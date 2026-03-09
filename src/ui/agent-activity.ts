@@ -48,19 +48,59 @@ function humanizeToolName(name: string): string {
     .join(" ")
 }
 
-function firstStringCandidate(record: Record<string, unknown> | null, keys: string[]): string | null {
-  if (!record) {
-    return null
+function compactPath(value: string): string {
+  const normalized = value.replace(/\\/g, "/").trim()
+  if (normalized.length === 0) {
+    return ""
   }
 
-  for (const key of keys) {
-    const value = readStringField(record, key)
-    if (value) {
-      return value
-    }
+  const parts = normalized.split("/").filter((part) => part.length > 0)
+  if (parts.length <= 3) {
+    return normalized
   }
 
-  return null
+  return `…/${parts.slice(-3).join("/")}`
+}
+
+function summarizeBashCommand(command: string): string {
+  const normalized = command.replace(/\s+/g, " ").trim().toLowerCase()
+  if (normalized.length === 0) {
+    return "Run shell command"
+  }
+
+  if (/\b(rg|grep|find|fd)\b/.test(normalized)) {
+    return "Search project files"
+  }
+
+  if (/\b(npm|pnpm|yarn|bun)\s+test\b|\bvitest\b|\bjest\b/.test(normalized)) {
+    return "Run tests"
+  }
+
+  if (/\b(tsc|typecheck)\b/.test(normalized)) {
+    return "Run typecheck"
+  }
+
+  if (/\bgit\s+(status|diff|log|show|branch|rev-parse|ls-files)\b/.test(normalized)) {
+    return "Inspect git state"
+  }
+
+  if (/\b(ls|pwd|tree)\b/.test(normalized)) {
+    return "Inspect workspace files"
+  }
+
+  if (/\bsqlite3\b/.test(normalized)) {
+    return "Query workspace database"
+  }
+
+  if (/\b(npm|pnpm|yarn|bun)\s+run\s+dev\b|\bnext\s+dev\b|\bvite\b/.test(normalized)) {
+    return "Start development server"
+  }
+
+  if (/\b(npm|pnpm|yarn|bun)\s+run\s+build\b|\bnext\s+build\b/.test(normalized)) {
+    return "Run project build"
+  }
+
+  return "Run shell command"
 }
 
 function extractTextFromUnknown(value: unknown): string {
@@ -96,22 +136,22 @@ export function summarizeToolCall(toolNameRaw: unknown, args: unknown): string {
   switch (toolName) {
     case "read": {
       const target = directArg ?? readStringField(argRecord, "path")
-      return target ? `Read ${code(compactInline(target, 96))}` : "Read file"
+      return target ? `Read ${code(compactInline(compactPath(target), 96))}` : "Read file"
     }
 
     case "edit": {
       const target = directArg ?? readStringField(argRecord, "path")
-      return target ? `Edit ${code(compactInline(target, 96))}` : "Edit file"
+      return target ? `Edit ${code(compactInline(compactPath(target), 96))}` : "Edit file"
     }
 
     case "write": {
       const target = directArg ?? readStringField(argRecord, "path")
-      return target ? `Write ${code(compactInline(target, 96))}` : "Write file"
+      return target ? `Write ${code(compactInline(compactPath(target), 96))}` : "Write file"
     }
 
     case "bash": {
       const command = directArg ?? readStringField(argRecord, "command")
-      return command ? `Run ${code(compactInline(command))}` : "Run command"
+      return command ? summarizeBashCommand(command) : "Run shell command"
     }
 
     case "todo": {
@@ -122,16 +162,8 @@ export function summarizeToolCall(toolNameRaw: unknown, args: unknown): string {
     }
 
     default: {
-      const candidate =
-        directArg ??
-        firstStringCandidate(argRecord, ["path", "command", "query", "pattern", "action", "id", "name", "url", "text"])
-
       const label = humanizeToolName(toolName)
-      if (!candidate) {
-        return label
-      }
-
-      return `${label} ${code(compactInline(candidate))}`
+      return label
     }
   }
 }
