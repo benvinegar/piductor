@@ -71,6 +71,10 @@ bun run dev
 
 Plain text input sends a message to the selected workspace agent using the current mode.
 
+`/help` opens a modal command reference.
+
+Type `/` in the composer to open command autocomplete (mouse-select or `Tab` to apply a suggestion).
+
 `/pr create` requires GitHub CLI auth (`gh auth login`).
 
 ## Keyboard + mouse controls
@@ -90,6 +94,7 @@ Plain text input sends a message to the selected workspace agent using the curre
 - Click repo rows in the workspace tree to expand/collapse nested workspaces
 - Diff review opens as a modal overlay with mouse controls: click `Mode`, `Close`, `◀/▶ File`, and `◀/▶ Hunk` buttons
 - Optional keyboard shortcuts in diff review (when focus is not in composer): `Esc` or `q` close review, `m` toggle unified/split, `n`/`p` next/prev file
+- `Esc` closes command/help and create-workspace modals
 
 ## Configuration
 

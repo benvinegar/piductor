@@ -51,6 +51,7 @@ import { formatTestRunStatus, nextTestRunFinished, nextTestRunStarted, type Test
 import { evaluateWorkspaceReadiness, formatWorkspaceReadinessLabel } from "../workspace/readiness"
 import { diffFingerprintFromStats } from "../review/diff-fingerprint"
 import { LOADING_TOKEN, renderLoadingTokens } from "./loading"
+import { buildHelpMarkdown, findCommandSuggestions } from "./commands"
 import { compactThinkingPreview } from "./thinking-preview"
 import { sanitizePiStderrLine, shouldSurfacePiStderr } from "../network/pi-stderr"
 import { parseAgentCommand, resolveRestartModel } from "../agent/control"
@@ -154,6 +155,9 @@ export interface AppSnapshot {
   statusText: string
   conversationTabsText: string
   conversationMarkdown: string
+  commandModalVisible: boolean
+  commandModalTitle: string
+  commandModalMarkdown: string
   diffModalVisible: boolean
   diffViewMode: DiffViewMode
   diffReviewTitle: string
@@ -332,6 +336,9 @@ export class PiConductorApp {
   private diffModalVisible = false
   private conversationTabsText = " All changes · Review branch changes · Debugging"
   private conversationMarkdown = DEFAULT_CONVERSATION
+  private commandModalVisible = false
+  private commandModalTitle = ""
+  private commandModalMarkdown = ""
   private diffViewMode: DiffViewMode = "unified"
   private diffReviewTitle = "Review branch changes"
   private diffReviewDiff = ""
@@ -371,6 +378,9 @@ export class PiConductorApp {
     statusText: this.statusText,
     conversationTabsText: this.conversationTabsText,
     conversationMarkdown: this.conversationMarkdown,
+    commandModalVisible: this.commandModalVisible,
+    commandModalTitle: this.commandModalTitle,
+    commandModalMarkdown: this.commandModalMarkdown,
     diffModalVisible: this.diffModalVisible,
     diffViewMode: this.diffViewMode,
     diffReviewTitle: this.diffReviewTitle,
@@ -459,6 +469,9 @@ export class PiConductorApp {
       statusText: this.statusText,
       conversationTabsText: this.conversationTabsText,
       conversationMarkdown: this.conversationMarkdown,
+      commandModalVisible: this.commandModalVisible,
+      commandModalTitle: this.commandModalTitle,
+      commandModalMarkdown: this.commandModalMarkdown,
       diffModalVisible: this.diffModalVisible,
       diffViewMode: this.diffViewMode,
       diffReviewTitle: this.diffReviewTitle,
@@ -674,37 +687,7 @@ export class PiConductorApp {
 
     switch (command) {
       case "help": {
-        this.appendGlobalLog("Commands:")
-        this.appendGlobalLog("  /repo add <local-path|git-url> [name]")
-        this.appendGlobalLog("  /repo select <id|name>")
-        this.appendGlobalLog("  /workspace new <name> [baseRef]")
-        this.appendGlobalLog("  /workspace new --branch <branch> [name]")
-        this.appendGlobalLog("  /workspace branches")
-        this.appendGlobalLog("  /workspace archive")
-        this.appendGlobalLog("  /workspace archived")
-        this.appendGlobalLog("  /workspace restore <id|name>")
-        this.appendGlobalLog("  /workspace select <id|name>")
-        this.appendGlobalLog("  /agent start [model]")
-        this.appendGlobalLog("  /agent stop")
-        this.appendGlobalLog("  /agent restart [model]")
-        this.appendGlobalLog("  /agent kill")
-        this.appendGlobalLog("  /agent list")
-        this.appendGlobalLog("  /mode <prompt|steer|follow_up>")
-        this.appendGlobalLog("  /pr create [--dry-run]")
-        this.appendGlobalLog("  /run [command]  (or config scripts.run)")
-        this.appendGlobalLog("  /test [command]  (or config scripts.test)")
-        this.appendGlobalLog("  /run setup")
-        this.appendGlobalLog("  /run archive")
-        this.appendGlobalLog("  /run stop")
-        this.appendGlobalLog("  /run mode [concurrent|nonconcurrent]")
-        this.appendGlobalLog("  /status")
-        this.appendGlobalLog("  /diff [open|close|next|prev|mode [unified|split]|refresh]")
-        this.appendGlobalLog("  /ui left|right|toggle")
-        this.appendGlobalLog("Plain text sends to selected agent in current mode.")
-        this.appendGlobalLog("UI: click [+]/[-] in top bar to collapse sidebars (or ctrl+left / ctrl+right).")
-        this.appendGlobalLog("UI: drag the vertical separators to resize side columns.")
-        this.appendGlobalLog("UI: click sidebar section headers to collapse/expand sections.")
-        this.appendGlobalLog("UI: click repo rows in Workspaces to expand/collapse nested workspaces.")
+        this.openCommandModal("Help", buildHelpMarkdown())
         return
       }
 
@@ -2086,6 +2069,21 @@ export class PiConductorApp {
     this.emitSnapshot()
   }
 
+  public openCommandModal(title: string, markdown: string) {
+    this.commandModalTitle = title
+    this.commandModalMarkdown = markdown
+    this.commandModalVisible = true
+    this.emitSnapshot()
+  }
+
+  public closeCommandModal() {
+    if (!this.commandModalVisible) return
+    this.commandModalVisible = false
+    this.commandModalTitle = ""
+    this.commandModalMarkdown = ""
+    this.emitSnapshot()
+  }
+
   public openDiffReview() {
     const workspace = this.getSelectedWorkspace()
     if (!workspace) return
@@ -2526,6 +2524,8 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
   const [changesSectionCollapsed, setChangesSectionCollapsed] = useState(false)
   const [terminalSectionCollapsed, setTerminalSectionCollapsed] = useState(false)
   const [createWorkspaceModalVisible, setCreateWorkspaceModalVisible] = useState(false)
+  const [composerText, setComposerText] = useState("")
+  const [commandSuggestionIndex, setCommandSuggestionIndex] = useState(0)
   const [loadingFrameIndex, setLoadingFrameIndex] = useState(0)
 
   const conversationSyntaxStyle = useMemo(
@@ -2589,6 +2589,8 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
   )
   const lobbyContentHeight = lobbyAscii.length + 2
   const lobbyTopPadding = Math.max(7, Math.floor((terminalHeight - lobbyContentHeight) / 2) - 1)
+  const commandModalWidth = clamp(Math.floor(terminalWidth * 0.76), 64, Math.max(64, terminalWidth - 6))
+  const commandModalHeight = clamp(Math.floor(terminalHeight * 0.72), 14, Math.max(14, terminalHeight - 4))
   const diffModalWidth = clamp(Math.floor(terminalWidth * 0.9), 72, Math.max(72, terminalWidth - 4))
   const diffModalHeight = clamp(Math.floor(terminalHeight * 0.85), 16, Math.max(16, terminalHeight - 3))
   const headerActions = "/help · /mode · /ui"
@@ -2622,6 +2624,18 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
       ? `Thinking · ${snapshot.thinkingPreview}`
       : ""
   const centerMarkdown = snapshot.conversationMarkdown
+  const composerFirstLine = composerText.split(/\r?\n/, 1)[0] ?? ""
+  const hasSlashCommandPrefix = composerFirstLine.trimStart().startsWith("/")
+  const commandQuery = hasSlashCommandPrefix ? composerFirstLine.trimStart().slice(1) : ""
+  const commandSuggestions = findCommandSuggestions(commandQuery)
+  const commandAutocompleteVisible =
+    focusTarget === "input" &&
+    !workspaceSelectionMode &&
+    !createWorkspaceModalVisible &&
+    !snapshot.commandModalVisible &&
+    hasSlashCommandPrefix
+  const selectedCommandSuggestion = commandSuggestions[commandSuggestionIndex] ?? commandSuggestions[0] ?? null
+  const commandSuggestionHeight = commandAutocompleteVisible ? Math.min(commandSuggestions.length, 6) + 1 : 0
 
   const statusRows = snapshot.statusText
     .split("\n")
@@ -2672,8 +2686,39 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
 
     draftStateRef.current = transition.state
     composer.setText(transition.nextDraft)
+    setComposerText(transition.nextDraft)
     previousWorkspaceIdRef.current = nextWorkspaceId
   }, [snapshot.selectedWorkspaceId])
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const current = composerRef.current?.plainText ?? ""
+      setComposerText((prev) => (prev === current ? prev : current))
+    }, 80)
+
+    return () => clearInterval(timer)
+  }, [])
+
+  useEffect(() => {
+    setCommandSuggestionIndex(0)
+  }, [commandQuery])
+
+  useEffect(() => {
+    if (!commandAutocompleteVisible) {
+      setCommandSuggestionIndex(0)
+      return
+    }
+
+    const maxIndex = Math.max(0, commandSuggestions.length - 1)
+    setCommandSuggestionIndex((prev) => Math.max(0, Math.min(prev, maxIndex)))
+  }, [commandAutocompleteVisible, commandSuggestions])
+
+  const applyCommandSuggestion = (command: string) => {
+    const next = `/${command} `
+    composerRef.current?.setText(next)
+    setComposerText(next)
+    setFocusTarget("input")
+  }
 
   useEffect(() => {
     if (workspaceSelectionMode) {
@@ -2819,6 +2864,16 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
       return
     }
 
+    if (snapshot.commandModalVisible && key.name === "escape") {
+      key.preventDefault()
+      app.closeCommandModal()
+      return
+    }
+
+    if (snapshot.commandModalVisible) {
+      return
+    }
+
     if (key.ctrl && (key.name === "1" || key.name === "2")) {
       key.preventDefault()
       if (snapshot.leftSidebarCollapsed) {
@@ -2827,6 +2882,34 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
       setWorkspaceTreeCollapsed(false)
       setFocusTarget("workspace")
       return
+    }
+
+    if (commandAutocompleteVisible && focusTarget === "input") {
+      if (key.name === "down") {
+        key.preventDefault()
+        setCommandSuggestionIndex((prev) => {
+          if (commandSuggestions.length === 0) return 0
+          return (prev + 1) % commandSuggestions.length
+        })
+        return
+      }
+
+      if (key.name === "up") {
+        key.preventDefault()
+        setCommandSuggestionIndex((prev) => {
+          if (commandSuggestions.length === 0) return 0
+          return (prev - 1 + commandSuggestions.length) % commandSuggestions.length
+        })
+        return
+      }
+
+      if (key.name === "tab") {
+        if (selectedCommandSuggestion) {
+          key.preventDefault()
+          applyCommandSuggestion(selectedCommandSuggestion.command)
+          return
+        }
+      }
     }
 
     if (!snapshot.leftSidebarCollapsed && !workspaceTreeCollapsed && workspaceTreeHasFocus) {
@@ -3412,7 +3495,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
 
           <box
             id="pc-input-box"
-            height={6}
+            height={6 + commandSuggestionHeight}
             backgroundColor="#151922"
             shouldFill
             onMouseDown={() => {
@@ -3425,6 +3508,54 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
               paddingTop: 1,
             }}
           >
+            {commandAutocompleteVisible && commandSuggestions.length > 0 && (
+              <box
+                id="pc-command-autocomplete"
+                height={commandSuggestionHeight}
+                backgroundColor="#0b1220"
+                border
+                borderColor="#334155"
+                style={{
+                  flexDirection: "column",
+                  flexShrink: 0,
+                  marginBottom: 1,
+                  paddingLeft: 1,
+                  paddingRight: 1,
+                }}
+              >
+                {commandSuggestions.slice(0, 6).map((entry, index) => {
+                  const selected = index === commandSuggestionIndex
+                  return (
+                    <box
+                      key={`pc-cmd-suggestion-${entry.command}`}
+                      height={1}
+                      backgroundColor={selected ? "#1e293b" : "transparent"}
+                      onMouseDown={(event) => {
+                        event.preventDefault()
+                        applyCommandSuggestion(entry.command)
+                      }}
+                      style={{
+                        flexDirection: "row",
+                        alignItems: "center",
+                        flexShrink: 0,
+                      }}
+                    >
+                      <text
+                        content={`/${entry.command}`}
+                        fg={selected ? "#e2e8f0" : "#93c5fd"}
+                        wrapMode="none"
+                        style={{
+                          flexGrow: 1,
+                          flexShrink: 1,
+                        }}
+                      />
+                      <text content={entry.description} fg="#64748b" wrapMode="none" selectable={false} />
+                    </box>
+                  )
+                })}
+              </box>
+            )}
+
             <text
               id="pc-compose-hint"
               content={`${hasLoadingToken ? `${composerSpinner} ` : ""}Composer · /help · /mode prompt|steer|follow_up`}
@@ -3446,6 +3577,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                 const submitted = composerRef.current?.plainText ?? ""
                 draftStateRef.current = clearDraftForWorkspace(draftStateRef.current, snapshot.selectedWorkspaceId)
                 composerRef.current?.clear()
+                setComposerText("")
                 void app.submitInput(submitted)
               }}
               keyBindings={[
@@ -3884,6 +4016,107 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                 selectable={false}
               />
             </box>
+          </box>
+        </box>
+      )}
+
+      {snapshot.commandModalVisible && (
+        <box
+          id="pc-command-modal-backdrop"
+          position="absolute"
+          left={0}
+          top={0}
+          width="100%"
+          height="100%"
+          backgroundColor="#090d15"
+          onMouseDown={(event) => {
+            event.preventDefault()
+            app.closeCommandModal()
+          }}
+          style={{
+            zIndex: 92,
+          }}
+        >
+          <box
+            id="pc-command-modal"
+            position="absolute"
+            left="50%"
+            top="50%"
+            width={commandModalWidth}
+            height={commandModalHeight}
+            marginLeft={-Math.floor(commandModalWidth / 2)}
+            marginTop={-Math.floor(commandModalHeight / 2)}
+            border
+            borderStyle="double"
+            borderColor="#60a5fa"
+            backgroundColor="#0f172a"
+            title={`${snapshot.commandModalTitle} · Commands`}
+            titleAlignment="center"
+            onMouseDown={(event) => {
+              event.preventDefault()
+            }}
+            style={{
+              flexDirection: "column",
+              paddingLeft: 1,
+              paddingRight: 1,
+              paddingTop: 1,
+              paddingBottom: 1,
+            }}
+          >
+            <box
+              id="pc-command-modal-header"
+              height={1}
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                flexShrink: 0,
+              }}
+            >
+              <text
+                content="Search and run commands from the composer with `/...`"
+                fg="#94a3b8"
+                wrapMode="none"
+                style={{
+                  flexGrow: 1,
+                  flexShrink: 1,
+                }}
+              />
+
+              <box
+                id="pc-command-modal-close"
+                onMouseDown={(event) => {
+                  event.preventDefault()
+                  app.closeCommandModal()
+                }}
+              >
+                <text content="[Close]" fg="#fca5a5" wrapMode="none" selectable={false} />
+              </box>
+            </box>
+
+            <scrollbox
+              id="pc-command-modal-scroll"
+              border={false}
+              scrollY
+              scrollX={false}
+              shouldFill
+              style={{
+                flexGrow: 1,
+                marginTop: 1,
+              }}
+            >
+              <markdown content={snapshot.commandModalMarkdown} syntaxStyle={conversationSyntaxStyle} conceal width="100%" />
+            </scrollbox>
+
+            <text
+              content="Esc or [Close]"
+              fg="#64748b"
+              wrapMode="none"
+              selectable={false}
+              style={{
+                marginTop: 1,
+                flexShrink: 0,
+              }}
+            />
           </box>
         </box>
       )}
