@@ -1,12 +1,5 @@
 import { describe, expect, it } from "vitest"
-import {
-  DEFAULT_THEME_KEY,
-  getThemeByKey,
-  nextThemeKey,
-  parseThemeArgs,
-  resolveThemeKey,
-  toThemeMarkdown,
-} from "../src/ui/themes"
+import { DEFAULT_THEME_KEY, getThemeByKey, listThemes, resolveThemeKey } from "../src/ui/themes"
 
 describe("themes", () => {
   it("resolves theme aliases and names", () => {
@@ -16,29 +9,14 @@ describe("themes", () => {
     expect(resolveThemeKey("unknown-theme")).toBeNull()
   })
 
-  it("parses theme command args", () => {
-    expect(parseThemeArgs([])).toEqual({ action: "show" })
-    expect(parseThemeArgs(["list"])).toEqual({ action: "list" })
-    expect(parseThemeArgs(["next"])).toEqual({ action: "next" })
-    expect(parseThemeArgs(["set", "forest"])).toEqual({ action: "set", themeKey: "forest" })
-    expect(parseThemeArgs(["high", "contrast"])).toEqual({ action: "set", themeKey: "high_contrast" })
-    expect(parseThemeArgs(["set", "nope"])).toBeNull()
+  it("lists starter themes", () => {
+    const keys = listThemes().map((theme) => theme.key)
+    expect(keys).toEqual(["midnight", "light", "solarized", "forest", "high_contrast"])
   })
 
-  it("cycles themes in order", () => {
-    const first = nextThemeKey(DEFAULT_THEME_KEY)
-    expect(first).not.toBe(DEFAULT_THEME_KEY)
-    expect(nextThemeKey("high_contrast")).toBe(DEFAULT_THEME_KEY)
-  })
-
-  it("renders theme markdown with active marker", () => {
-    const markdown = toThemeMarkdown("forest")
-    expect(markdown).toContain("## Themes")
-    expect(markdown).toContain("`forest` **(active)**")
-  })
-
-  it("returns a theme definition for every key", () => {
-    const theme = getThemeByKey("midnight")
-    expect(theme.colors.appBackground).toMatch(/^#/) 
+  it("returns a theme definition for default key", () => {
+    const theme = getThemeByKey(DEFAULT_THEME_KEY)
+    expect(theme.colors.appBackground).toMatch(/^#/)
+    expect(theme.name.length).toBeGreaterThan(0)
   })
 })

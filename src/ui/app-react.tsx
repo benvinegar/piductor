@@ -78,10 +78,7 @@ import {
   DEFAULT_THEME_KEY,
   getThemeByKey,
   listThemes,
-  nextThemeKey,
-  parseThemeArgs,
   resolveThemeKey,
-  themeUsage,
   type ThemeKey,
   type UiThemeDefinition,
 } from "./themes"
@@ -1365,35 +1362,13 @@ export class PiConductorApp {
       }
 
       case "theme": {
-        if (args.length === 0) {
-          this.openThemeModal()
+        if (args.length > 0) {
+          this.appendGlobalLog("Usage: /theme")
+          this.appendGlobalLog("Use the picker (↑/↓, Enter) to choose a theme.")
           return
         }
 
-        const parsed = parseThemeArgs(args)
-        if (!parsed) {
-          this.appendGlobalLog(themeUsage())
-          return
-        }
-
-        if (parsed.action === "show") {
-          const theme = getThemeByKey(this.themeKey)
-          this.appendGlobalLog(`Theme: ${theme.name} (${theme.key})`)
-          return
-        }
-
-        if (parsed.action === "list") {
-          this.openThemeModal()
-          return
-        }
-
-        if (parsed.action === "next") {
-          const next = nextThemeKey(this.themeKey)
-          this.setTheme(next)
-          return
-        }
-
-        this.setTheme(parsed.themeKey)
+        this.openThemeModal()
         return
       }
 

@@ -59,7 +59,7 @@ bun run dev
 /agent start [model]
 /agent stop
 /mode <prompt|steer|follow_up>
-/theme [show|list|next|set <theme>|<theme>]
+/theme
 /pr create [--dry-run]
 /pr status
 /pr checks
@@ -87,7 +87,7 @@ Plain text input sends a message to the selected workspace agent using the curre
 
 Type `/` in the composer to open command autocomplete (mouse-select or `Tab` to apply a suggestion).
 
-Use `/theme list` to view available themes and `/theme set <theme>` (or `/theme next`) to switch themes at runtime. Theme selection persists across restarts.
+Use `/theme` to open the theme picker (↑/↓ to select, Enter to apply). Theme selection persists across restarts.
 
 `/pr create` requires GitHub CLI auth (`gh auth login`) and is blocked if required merge checklist items are incomplete. Use `/pr status`, `/pr checks`, and `/pr merge` for full PR lifecycle in-app.
 

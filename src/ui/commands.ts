@@ -19,7 +19,7 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = [
   { command: "agent kill", description: "Force kill workspace agent" },
   { command: "agent list", description: "List agents" },
   { command: "mode <prompt|steer|follow_up>", description: "Set send mode" },
-  { command: "theme [show|list|next|set <theme>|<theme>]", description: "Show or switch UI theme" },
+  { command: "theme", description: "Open theme picker" },
   { command: "pr create [--dry-run]", description: "Create pull request" },
   { command: "pr status", description: "Show pull request summary" },
   { command: "pr checks", description: "Show pull request checks" },
