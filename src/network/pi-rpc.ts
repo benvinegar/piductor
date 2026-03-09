@@ -197,6 +197,11 @@ export class PiRpcProcess {
     return response.data
   }
 
+  async getSessionStats(): Promise<any> {
+    const response = await this.sendExpectSuccess({ type: "get_session_stats" })
+    return response.data
+  }
+
   async setSessionName(name: string): Promise<void> {
     await this.sendExpectSuccess({ type: "set_session_name", name })
   }

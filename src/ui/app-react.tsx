@@ -15,12 +15,14 @@ import { createRoot, useKeyboard, useTerminalDimensions, type Root } from "@open
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
 import { Store } from "../core/db"
 import { PiRpcProcess } from "../network/pi-rpc"
-import type { AppConfig, RepoRecord, SendMode, WorkspaceRecord } from "../core/types"
+import type { AppConfig, RepoRecord, SendMode, WorkspaceRecord, WorkspaceRuntimeStateRecord } from "../core/types"
 import {
   addWorktreeForBranch,
   cloneRepo,
   createWorktree,
   ensureRepoFromLocalPath,
+  findWorktreeByBranch,
+  findWorktreeByPath,
   getChangedFiles,
   getChangedFileStats,
   getDefaultBranchName,
@@ -40,8 +42,21 @@ import {
   TREE_REPO_PREFIX,
   workspaceTreeValue,
 } from "../workspace/tree"
+import { parseWorkspaceArchiveArgs, workspaceArchiveUsage } from "../workspace/archive"
 import { parseWorkspaceNewArgs, suggestWorkspaceNameFromBranch, workspaceNewUsage } from "../workspace/new"
-import { extractFirstUrl, parsePrCreateArgs, prCreateUsage } from "../vcs/pr-command"
+import {
+  extractFirstUrl,
+  parsePrCreateArgs,
+  parsePrMergeArgs,
+  parsePrViewJson,
+  prCreateUsage,
+  prMergeUsage,
+  prUsage,
+  summarizePrChecks,
+  toPrStatusMarkdown,
+  type ParsedPrMergeArgs,
+  type PrViewRecord,
+} from "../vcs/pr-command"
 import { buildWorkspaceScriptEnv } from "../run/script-env"
 import { shouldStopExistingRun, stopSignalSequence } from "../run/policy"
 import { normalizeRunMode, parseRunCommandArgs, runCommandUsage, type RunMode } from "../run/command"
@@ -62,6 +77,7 @@ import { buildHelpMarkdown, findCommandSuggestions } from "./commands"
 import { compactThinkingPreview } from "./thinking-preview"
 import { sanitizePiStderrLine, shouldSurfacePiStderr } from "../network/pi-stderr"
 import { parseAgentCommand, resolveRestartModel } from "../agent/control"
+import { planAgentReconnect } from "../agent/reconnect"
 import { killProcessByPid } from "../agent/process-kill"
 import { UiFlushScheduler } from "./flush-scheduler"
 import { consumeBufferedLines } from "../run/stream-buffer"
@@ -222,6 +238,16 @@ function safeErr(error: unknown) {
   return error instanceof Error ? error.message : String(error)
 }
 
+function isPidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (error) {
+    const code = error && typeof error === "object" && "code" in error ? String((error as { code?: string }).code) : ""
+    return code === "EPERM"
+  }
+}
+
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
@@ -346,6 +372,7 @@ export class PiConductorApp {
   private readonly expandedRepoIds = new Set<number>()
   private readonly lastActivityByWorkspace = new Map<number, string>()
   private readonly lastTestRunByWorkspace = new Map<number, TestRunState>()
+  private readonly runtimeStateByWorkspace = new Map<number, WorkspaceRuntimeStateRecord>()
   private readonly uiFlushScheduler = new UiFlushScheduler(45, () => {
     this.refreshStatusPanel()
     this.refreshLogsPanel()
@@ -380,6 +407,7 @@ export class PiConductorApp {
   private readonly selectedDiffHunkByWorkspace = new Map<number, number>()
   private readonly diffFingerprintByWorkspace = new Map<number, string>()
   private readonly reviewedDiffFingerprintByWorkspace = new Map<number, string>()
+  private readonly prViewByWorkspace = new Map<number, PrViewRecord>()
   private lastDiffReviewRefreshKey = ""
   private terminalText = "No workspace selected."
   private footerText = ""
@@ -524,6 +552,8 @@ export class PiConductorApp {
     this.appendGlobalLog("Type /help to see commands.")
 
     await this.autoAddCurrentRepoIfPossible()
+    this.loadWorkspaceRuntimeState()
+    await this.reconcilePersistedAgents()
     this.reloadRepos()
     this.reloadWorkspaces()
     this.refreshStatusPanel()
@@ -868,19 +898,59 @@ export class PiConductorApp {
             return
           }
 
+          const parsedArchive = parseWorkspaceArchiveArgs(args.slice(1))
+          if (!parsedArchive) {
+            this.appendGlobalLog(workspaceArchiveUsage())
+            return
+          }
+
+          const forceArchive = parsedArchive.force
+
           const repo = this.store.getRepoById(workspace.repoId)
           if (!repo) {
             this.appendGlobalLog("Workspace repo missing.")
             return
           }
 
-          await this.stopAgent(workspace.id, { force: false, reason: "archive" })
+          let changedCount = 0
+          try {
+            changedCount = getChangedFiles(workspace.worktreePath).length
+          } catch {
+            changedCount = 0
+          }
+
+          if (changedCount > 0 && !forceArchive) {
+            this.appendWorkspaceLog(
+              workspace.id,
+              `[workspace] archive blocked: ${changedCount} uncommitted change(s). Re-run with /workspace archive --force.`,
+            )
+            return
+          }
+
+          const runningCount = this.runProcessCount(workspace.id)
+          if (runningCount > 0) {
+            this.appendWorkspaceLog(workspace.id, `[workspace] stopping ${runningCount} run process(es) before archive.`)
+            await this.stopRunProcess(workspace.id, "workspace archive")
+          }
+
+          await this.stopAgent(workspace.id, { force: forceArchive, reason: "archive" })
 
           if (this.config.scripts.archive) {
             await this.runConfiguredScript(workspace.id, "archive")
           }
 
-          removeWorktree({ repoRoot: repo.rootPath, worktreePath: workspace.worktreePath, force: true })
+          try {
+            removeWorktree({ repoRoot: repo.rootPath, worktreePath: workspace.worktreePath, force: forceArchive })
+          } catch (error) {
+            this.appendWorkspaceLog(
+              workspace.id,
+              `[workspace] failed to archive worktree${forceArchive ? " (forced)" : ""}: ${safeErr(error)}`,
+            )
+            return
+          }
+
+          this.prViewByWorkspace.delete(workspace.id)
+          this.store.clearMergeChecklistItems(workspace.id)
           this.store.setWorkspaceArchived(workspace.id, true)
 
           this.appendGlobalLog(`Archived workspace: ${workspace.name}`)
@@ -927,16 +997,47 @@ export class PiConductorApp {
             return
           }
 
+          const existingForBranch = findWorktreeByBranch(repo.rootPath, workspace.branch)
+          if (existingForBranch && existingForBranch.path !== workspace.worktreePath) {
+            this.appendGlobalLog(
+              `Cannot restore: branch ${workspace.branch} is already checked out at ${existingForBranch.path}`,
+            )
+            return
+          }
+
+          const existingAtPath = findWorktreeByPath(repo.rootPath, workspace.worktreePath)
+          if (existingAtPath) {
+            if (existingAtPath.branch && existingAtPath.branch !== workspace.branch) {
+              this.appendGlobalLog(
+                `Cannot restore: ${workspace.worktreePath} is attached to branch ${existingAtPath.branch} (expected ${workspace.branch}).`,
+              )
+              return
+            }
+
+            this.store.setWorkspaceArchived(workspace.id, false)
+            this.selectedRepoId = workspace.repoId
+            this.selectedWorkspaceId = workspace.id
+            this.reloadRepos(workspace.repoId)
+            this.reloadWorkspaces(workspace.id)
+            this.appendGlobalLog(`Restored workspace using existing worktree: ${workspace.name}`)
+            return
+          }
+
           if (existsSync(workspace.worktreePath)) {
             this.appendGlobalLog(`Cannot restore: path already exists (${workspace.worktreePath})`)
             return
           }
 
-          addWorktreeForBranch({
-            repoRoot: repo.rootPath,
-            worktreePath: workspace.worktreePath,
-            branch: workspace.branch,
-          })
+          try {
+            addWorktreeForBranch({
+              repoRoot: repo.rootPath,
+              worktreePath: workspace.worktreePath,
+              branch: workspace.branch,
+            })
+          } catch (error) {
+            this.appendGlobalLog(`Failed to restore workspace ${workspace.name}: ${safeErr(error)}`)
+            return
+          }
 
           this.store.setWorkspaceArchived(workspace.id, false)
           this.selectedRepoId = workspace.repoId
@@ -969,7 +1070,7 @@ export class PiConductorApp {
           return
         }
 
-        this.appendGlobalLog("Usage: /workspace new|branches|archive|archived|restore|select ...")
+        this.appendGlobalLog("Usage: /workspace new|branches|archive [--force]|archived|restore|select ...")
         return
       }
 
@@ -1014,17 +1115,7 @@ export class PiConductorApp {
       }
 
       case "pr": {
-        const sub = (args[0] || "").toLowerCase()
-        if (sub !== "create") {
-          this.appendGlobalLog(prCreateUsage())
-          return
-        }
-
-        const parsed = parsePrCreateArgs(args.slice(1))
-        if (!parsed) {
-          this.appendGlobalLog(prCreateUsage())
-          return
-        }
+        const sub = (args[0] || "create").toLowerCase()
 
         const workspace = this.getSelectedWorkspace()
         if (!workspace) {
@@ -1032,64 +1123,103 @@ export class PiConductorApp {
           return
         }
 
-        if (!parsed.dryRun) {
-          this.refreshDiffPanel()
-          const mergeChecklist = this.evaluateWorkspaceMergeChecklist(workspace).evaluation
-          if (mergeChecklist.blocked) {
-            this.appendWorkspaceLog(
-              workspace.id,
-              `[pr] blocked by merge checklist (${mergeChecklist.pendingRequired.length} pending):`,
-            )
-            for (const item of mergeChecklist.pendingRequired) {
-              this.appendWorkspaceLog(workspace.id, `  - [ ] ${item.label} (${item.key})`)
-            }
-            this.openWorkspaceChecklistModal(workspace)
+        if (!["create", "status", "checks", "merge"].includes(sub)) {
+          this.appendGlobalLog(prUsage())
+          return
+        }
+
+        if (!this.ensureGithubAuth(workspace)) {
+          return
+        }
+
+        if (sub === "create") {
+          const parsed = parsePrCreateArgs(args.slice(1))
+          if (!parsed) {
+            this.appendGlobalLog(prCreateUsage())
             return
           }
-        }
 
-        const auth = this.runCommand("gh", ["auth", "status"], workspace.worktreePath)
-        if (auth.status !== 0) {
-          this.appendWorkspaceLog(workspace.id, "GitHub auth unavailable. Run `gh auth login` first.")
-          if (auth.stderr) this.appendWorkspaceLog(workspace.id, auth.stderr)
-          return
-        }
+          if (!parsed.dryRun) {
+            this.refreshDiffPanel()
+            const mergeChecklist = this.evaluateWorkspaceMergeChecklist(workspace).evaluation
+            if (mergeChecklist.blocked) {
+              this.appendWorkspaceLog(
+                workspace.id,
+                `[pr] blocked by merge checklist (${mergeChecklist.pendingRequired.length} pending):`,
+              )
+              for (const item of mergeChecklist.pendingRequired) {
+                this.appendWorkspaceLog(workspace.id, `  - [ ] ${item.label} (${item.key})`)
+              }
+              this.openWorkspaceChecklistModal(workspace)
+              return
+            }
+          }
 
-        if (parsed.dryRun) {
-          this.appendWorkspaceLog(workspace.id, `[pr] dry run: would push branch ${workspace.branch}`)
-          this.appendWorkspaceLog(workspace.id, `[pr] dry run: gh pr create --fill --head ${workspace.branch}`)
-          return
-        }
+          if (parsed.dryRun) {
+            this.appendWorkspaceLog(workspace.id, `[pr] dry run: would push branch ${workspace.branch}`)
+            this.appendWorkspaceLog(workspace.id, `[pr] dry run: gh pr create --fill --head ${workspace.branch}`)
+            return
+          }
 
-        this.appendWorkspaceLog(workspace.id, `[pr] pushing branch ${workspace.branch} ...`)
-        const push = this.runCommand("git", ["push", "-u", "origin", workspace.branch], workspace.worktreePath)
-        if (push.status !== 0) {
-          const detail = [push.stderr, push.stdout].filter(Boolean).join("\n") || "git push failed"
-          this.appendWorkspaceLog(workspace.id, `[pr] push failed:\n${detail}`)
-          return
-        }
+          this.appendWorkspaceLog(workspace.id, `[pr] pushing branch ${workspace.branch} ...`)
+          const push = this.runCommand("git", ["push", "-u", "origin", workspace.branch], workspace.worktreePath)
+          if (push.status !== 0) {
+            const detail = [push.stderr, push.stdout].filter(Boolean).join("\n") || "git push failed"
+            this.appendWorkspaceLog(workspace.id, `[pr] push failed:\n${detail}`)
+            return
+          }
 
-        this.appendWorkspaceLog(workspace.id, "[pr] creating pull request via gh ...")
-        const create = this.runCommand("gh", ["pr", "create", "--fill", "--head", workspace.branch], workspace.worktreePath)
-        const output = [create.stdout, create.stderr].filter(Boolean).join("\n")
-        const prUrl = extractFirstUrl(output)
+          this.appendWorkspaceLog(workspace.id, "[pr] creating pull request via gh ...")
+          const create = this.runCommand("gh", ["pr", "create", "--fill", "--head", workspace.branch], workspace.worktreePath)
+          const output = [create.stdout, create.stderr].filter(Boolean).join("\n")
+          const prUrl = extractFirstUrl(output)
 
-        if (create.status !== 0) {
+          if (create.status !== 0) {
+            if (prUrl) {
+              this.appendWorkspaceLog(workspace.id, `[pr] pull request already exists: ${prUrl}`)
+            } else {
+              this.appendWorkspaceLog(workspace.id, `[pr] create failed:\n${output || "unknown error"}`)
+            }
+            return
+          }
+
           if (prUrl) {
-            this.appendWorkspaceLog(workspace.id, `[pr] pull request already exists: ${prUrl}`)
+            this.appendWorkspaceLog(workspace.id, `[pr] created: ${prUrl}`)
+            this.appendGlobalLog(`PR created for ${workspace.name}: ${prUrl}`)
           } else {
-            this.appendWorkspaceLog(workspace.id, `[pr] create failed:\n${output || "unknown error"}`)
+            this.appendWorkspaceLog(workspace.id, `[pr] created. Output:\n${output || "(no output)"}`)
+            this.appendGlobalLog(`PR created for ${workspace.name}.`)
+          }
+
+          const createdPr = this.fetchWorkspacePrView(workspace, { logWhenMissing: false })
+          if (createdPr) {
+            this.openWorkspacePrModal(workspace, "Pull request", createdPr)
           }
           return
         }
 
-        if (prUrl) {
-          this.appendWorkspaceLog(workspace.id, `[pr] created: ${prUrl}`)
-          this.appendGlobalLog(`PR created for ${workspace.name}: ${prUrl}`)
-        } else {
-          this.appendWorkspaceLog(workspace.id, `[pr] created. Output:\n${output || "(no output)"}`)
-          this.appendGlobalLog(`PR created for ${workspace.name}.`)
+        if (sub === "status" || sub === "checks") {
+          const pr = this.fetchWorkspacePrView(workspace)
+          if (!pr) {
+            return
+          }
+
+          this.openWorkspacePrModal(workspace, sub === "status" ? "Pull request" : "PR checks", pr)
+          const checks = summarizePrChecks(pr.checks)
+          this.appendWorkspaceLog(
+            workspace.id,
+            `[pr] #${pr.number ?? "?"} ${pr.state ?? "<unknown>"}${pr.isDraft ? " (draft)" : ""} · checks ${checks.label}`,
+          )
+          return
         }
+
+        const mergeArgs = parsePrMergeArgs(args.slice(1))
+        if (!mergeArgs) {
+          this.appendGlobalLog(prMergeUsage())
+          return
+        }
+
+        await this.handlePrMerge(workspace, mergeArgs)
         return
       }
 
@@ -1386,6 +1516,119 @@ export class PiConductorApp {
     }
   }
 
+  private ensureGithubAuth(workspace: WorkspaceRecord): boolean {
+    const auth = this.runCommand("gh", ["auth", "status"], workspace.worktreePath)
+    if (auth.status === 0) {
+      return true
+    }
+
+    this.appendWorkspaceLog(workspace.id, "GitHub auth unavailable. Run `gh auth login` first.")
+    if (auth.stderr) this.appendWorkspaceLog(workspace.id, auth.stderr)
+    return false
+  }
+
+  private fetchWorkspacePrView(
+    workspace: WorkspaceRecord,
+    options: { logWhenMissing?: boolean } = {},
+  ): PrViewRecord | null {
+    const result = this.runCommand(
+      "gh",
+      [
+        "pr",
+        "view",
+        workspace.branch,
+        "--json",
+        "number,url,title,state,isDraft,mergeStateStatus,reviewDecision,headRefName,baseRefName,statusCheckRollup",
+      ],
+      workspace.worktreePath,
+    )
+
+    if (result.status !== 0) {
+      const detail = [result.stderr, result.stdout].filter(Boolean).join("\n")
+      const missing = /no pull requests found/i.test(detail)
+
+      if (missing) {
+        this.prViewByWorkspace.delete(workspace.id)
+        if (options.logWhenMissing !== false) {
+          this.appendWorkspaceLog(workspace.id, `[pr] no pull request found for branch ${workspace.branch}.`)
+        }
+        return null
+      }
+
+      this.appendWorkspaceLog(workspace.id, `[pr] failed to query pull request:\n${detail || "unknown error"}`)
+      return null
+    }
+
+    const parsed = parsePrViewJson(result.stdout)
+    if (!parsed) {
+      this.appendWorkspaceLog(workspace.id, "[pr] failed to parse `gh pr view` output.")
+      return null
+    }
+
+    this.prViewByWorkspace.set(workspace.id, parsed)
+    return parsed
+  }
+
+  private openWorkspacePrModal(workspace: WorkspaceRecord, title: string, view: PrViewRecord) {
+    const markdown = toPrStatusMarkdown(workspace.name, view)
+    this.openCommandModal(title, markdown)
+  }
+
+  private async handlePrMerge(workspace: WorkspaceRecord, mergeArgs: ParsedPrMergeArgs) {
+    if (!mergeArgs.dryRun) {
+      this.refreshDiffPanel()
+      const mergeChecklist = this.evaluateWorkspaceMergeChecklist(workspace).evaluation
+      if (mergeChecklist.blocked) {
+        this.appendWorkspaceLog(
+          workspace.id,
+          `[pr] merge blocked by checklist (${mergeChecklist.pendingRequired.length} pending).`,
+        )
+        for (const item of mergeChecklist.pendingRequired) {
+          this.appendWorkspaceLog(workspace.id, `  - [ ] ${item.label} (${item.key})`)
+        }
+        this.openWorkspaceChecklistModal(workspace)
+        return
+      }
+    }
+
+    const pr = this.fetchWorkspacePrView(workspace)
+    if (!pr) {
+      return
+    }
+
+    const mergeCommand = ["pr", "merge", "--yes", `--${mergeArgs.method}`]
+    if (mergeArgs.deleteBranch) {
+      mergeCommand.push("--delete-branch")
+    }
+
+    const target = pr.url ?? workspace.branch
+    mergeCommand.push(target)
+
+    if (mergeArgs.dryRun) {
+      this.appendWorkspaceLog(workspace.id, `[pr] dry run: gh ${mergeCommand.join(" ")}`)
+      return
+    }
+
+    this.appendWorkspaceLog(workspace.id, `[pr] merging #${pr.number ?? "?"} via ${mergeArgs.method} ...`)
+    const merged = this.runCommand("gh", mergeCommand, workspace.worktreePath)
+    const output = [merged.stdout, merged.stderr].filter(Boolean).join("\n")
+
+    if (merged.status !== 0) {
+      this.appendWorkspaceLog(workspace.id, `[pr] merge failed:\n${output || "unknown error"}`)
+      return
+    }
+
+    this.appendWorkspaceLog(workspace.id, `[pr] merged #${pr.number ?? "?"}.`)
+    if (output) {
+      this.appendWorkspaceLog(workspace.id, output)
+    }
+
+    const refreshed = this.fetchWorkspacePrView(workspace, { logWhenMissing: false })
+    if (refreshed) {
+      this.openWorkspacePrModal(workspace, "Pull request", refreshed)
+    }
+  }
+
   private signalRunProcess(child: ChildProcessWithoutNullStreams, signal: NodeJS.Signals) {
     if (!child.pid) return
 
@@ -1475,6 +1718,11 @@ export class PiConductorApp {
     }
 
     this.appendWorkspaceLog(workspace.id, `[you/${sendMode}] ${message}`)
+    const runtime = this.getWorkspaceRuntimeState(workspace.id)
+    this.setWorkspaceRuntimeState(workspace.id, {
+      sendMode,
+      userMessages: runtime.userMessages + 1,
+    })
 
     if (!agent) {
       await this.startAgent(workspace.id, this.config.defaultModel)
@@ -1510,6 +1758,25 @@ export class PiConductorApp {
 
     if (this.agentByWorkspace.has(workspaceId)) {
       this.appendWorkspaceLog(workspaceId, "Agent already running.")
+      return
+    }
+
+    const persisted = this.store.getAgent(workspaceId)
+    if (persisted?.pid && isPidAlive(persisted.pid)) {
+      this.appendWorkspaceLog(
+        workspaceId,
+        `Agent pid ${persisted.pid} is already running but unmanaged. Use /agent kill before /agent start.`,
+      )
+      this.store.setAgentState({
+        workspaceId,
+        status: "error",
+        pid: persisted.pid,
+        model: persisted.model,
+        sessionId: persisted.sessionId,
+        lastError: "stale agent process detected",
+      })
+      this.refreshStatusPanel()
+      this.emitSnapshot()
       return
     }
 
@@ -1555,6 +1822,7 @@ export class PiConductorApp {
       })
 
       this.appendWorkspaceLog(workspaceId, `[agent] started (pid=${agent.pid ?? "?"}).`)
+      void this.refreshWorkspaceSessionStats(workspaceId)
     } catch (error) {
       this.store.setAgentState({
         workspaceId,
@@ -1799,10 +2067,15 @@ export class PiConductorApp {
         this.appendWorkspaceLog(workspaceId, `[tool] ${event.toolName} start`)
         break
 
-      case "tool_execution_end":
+      case "tool_execution_end": {
         this.appendWorkspaceLog(workspaceId, `[tool] ${event.toolName} ${event.isError ? "error" : "ok"}`)
+        const runtime = this.getWorkspaceRuntimeState(workspaceId)
+        this.setWorkspaceRuntimeState(workspaceId, {
+          toolCallCount: runtime.toolCallCount + 1,
+        })
         this.refreshDiffPanel()
         break
+      }
 
       case "message_update": {
         const delta = event.assistantMessageEvent
@@ -1820,11 +2093,21 @@ export class PiConductorApp {
         this.appendWorkspaceLog(workspaceId, "[assistant-break]")
         break
 
-      case "turn_end":
+      case "turn_end": {
         this.agentTurnsInFlight.delete(workspaceId)
         this.flushThinkingPartial(workspaceId)
         this.flushAssistantPartial(workspaceId)
+
+        const runtime = this.getWorkspaceRuntimeState(workspaceId)
+        this.setWorkspaceRuntimeState(workspaceId, {
+          turnCount: runtime.turnCount + 1,
+          assistantMessages: runtime.assistantMessages + 1,
+          lastTurnAt: new Date().toISOString(),
+        })
+
+        void this.refreshWorkspaceSessionStats(workspaceId)
         break
+      }
 
       case "extension_ui_request": {
         const method = typeof event.method === "string" ? event.method : ""
@@ -1857,6 +2140,44 @@ export class PiConductorApp {
     }
 
     this.refreshAllAndEmit()
+  }
+
+  private async refreshWorkspaceSessionStats(workspaceId: number) {
+    const agent = this.agentByWorkspace.get(workspaceId)
+    if (!agent) {
+      return
+    }
+
+    try {
+      const stats = await agent.getSessionStats()
+      const runtime = this.getWorkspaceRuntimeState(workspaceId)
+
+      const userMessages =
+        typeof stats?.userMessages === "number" && Number.isFinite(stats.userMessages)
+          ? stats.userMessages
+          : runtime.userMessages
+      const assistantMessages =
+        typeof stats?.assistantMessages === "number" && Number.isFinite(stats.assistantMessages)
+          ? stats.assistantMessages
+          : runtime.assistantMessages
+      const sessionToolCalls =
+        typeof stats?.toolCalls === "number" && Number.isFinite(stats.toolCalls)
+          ? stats.toolCalls
+          : runtime.sessionToolCalls
+
+      const tokensTotalRaw = Number(stats?.tokens?.total)
+      const costTotalRaw = Number(stats?.cost)
+
+      this.setWorkspaceRuntimeState(workspaceId, {
+        userMessages,
+        assistantMessages,
+        sessionToolCalls,
+        tokensTotal: Number.isFinite(tokensTotalRaw) ? tokensTotalRaw : runtime.tokensTotal,
+        costTotal: Number.isFinite(costTotalRaw) ? costTotalRaw : runtime.costTotal,
+      })
+    } catch {
+      // Ignore stats polling failures; core agent flow should continue.
+    }
   }
 
   private appendAssistantStream(workspaceId: number, delta: string) {
@@ -1899,6 +2220,66 @@ export class PiConductorApp {
       this.appendWorkspaceLog(workspaceId, partial)
     }
     this.assistantPartialByWorkspace.delete(workspaceId)
+  }
+
+  private async reconcilePersistedAgents() {
+    const persistedAgents = this.store.listAgents()
+    if (persistedAgents.length === 0) {
+      return
+    }
+
+    for (const persisted of persistedAgents) {
+      const workspace = this.store.getWorkspaceById(persisted.workspaceId)
+      const workspaceStatus = workspace?.status ?? null
+      const pidAlive = typeof persisted.pid === "number" ? isPidAlive(persisted.pid) : false
+      const action = planAgentReconnect({
+        workspaceStatus,
+        agent: persisted,
+        pidAlive,
+      })
+
+      if (action.type === "skip") {
+        continue
+      }
+
+      if (action.type === "mark_stopped") {
+        this.store.setAgentState({
+          workspaceId: persisted.workspaceId,
+          status: "stopped",
+          pid: null,
+          model: persisted.model,
+          sessionId: persisted.sessionId,
+          lastError: action.reason,
+        })
+        if (workspace) {
+          this.appendWorkspaceLog(workspace.id, `[agent] reconnect: ${action.reason}`)
+        }
+        continue
+      }
+
+      if (action.type === "mark_orphaned") {
+        this.store.setAgentState({
+          workspaceId: persisted.workspaceId,
+          status: "error",
+          pid: persisted.pid,
+          model: persisted.model,
+          sessionId: persisted.sessionId,
+          lastError: action.reason,
+        })
+        if (workspace) {
+          this.appendWorkspaceLog(workspace.id, `[agent] reconnect: ${action.reason}`)
+        }
+        continue
+      }
+
+      if (!workspace) {
+        continue
+      }
+
+      this.appendWorkspaceLog(workspace.id, `[agent] reconnect: ${action.reason}`)
+      await this.startAgent(workspace.id, persisted.model ?? this.config.defaultModel)
+      this.appendWorkspaceLog(workspace.id, "[agent] reconnect: session restored")
+    }
   }
 
   private async autoAddCurrentRepoIfPossible() {
@@ -2297,6 +2678,65 @@ export class PiConductorApp {
     return workspace
   }
 
+  private loadWorkspaceRuntimeState() {
+    this.runtimeStateByWorkspace.clear()
+
+    for (const record of this.store.listWorkspaceRuntimeStates()) {
+      this.runtimeStateByWorkspace.set(record.workspaceId, record)
+      if (record.sendMode) {
+        this.sendModeState = setWorkspaceSendMode(this.sendModeState, record.workspaceId, record.sendMode)
+      }
+    }
+  }
+
+  private getWorkspaceRuntimeState(workspaceId: number): WorkspaceRuntimeStateRecord {
+    const existing = this.runtimeStateByWorkspace.get(workspaceId)
+    if (existing) {
+      return existing
+    }
+
+    const fresh: WorkspaceRuntimeStateRecord = {
+      workspaceId,
+      sendMode: null,
+      turnCount: 0,
+      toolCallCount: 0,
+      lastTurnAt: null,
+      userMessages: 0,
+      assistantMessages: 0,
+      sessionToolCalls: 0,
+      tokensTotal: 0,
+      costTotal: 0,
+      updatedAt: new Date().toISOString(),
+    }
+
+    this.runtimeStateByWorkspace.set(workspaceId, fresh)
+    return fresh
+  }
+
+  private setWorkspaceRuntimeState(workspaceId: number, patch: Partial<WorkspaceRuntimeStateRecord>) {
+    const current = this.getWorkspaceRuntimeState(workspaceId)
+    const next: WorkspaceRuntimeStateRecord = {
+      ...current,
+      ...patch,
+      workspaceId,
+      updatedAt: new Date().toISOString(),
+    }
+
+    this.runtimeStateByWorkspace.set(workspaceId, next)
+    this.store.upsertWorkspaceRuntimeState({
+      workspaceId,
+      sendMode: next.sendMode,
+      turnCount: next.turnCount,
+      toolCallCount: next.toolCallCount,
+      lastTurnAt: next.lastTurnAt,
+      userMessages: next.userMessages,
+      assistantMessages: next.assistantMessages,
+      sessionToolCalls: next.sessionToolCalls,
+      tokensTotal: next.tokensTotal,
+      costTotal: next.costTotal,
+    })
+  }
+
   private getSendModeForWorkspace(workspaceId: number | null): SendMode {
     return getWorkspaceSendMode(this.sendModeState, workspaceId)
   }
@@ -2307,6 +2747,10 @@ export class PiConductorApp {
 
   private setSendModeForCurrentSelection(mode: SendMode) {
     this.sendModeState = setWorkspaceSendMode(this.sendModeState, this.selectedWorkspaceId, mode)
+
+    if (this.selectedWorkspaceId) {
+      this.setWorkspaceRuntimeState(this.selectedWorkspaceId, { sendMode: mode })
+    }
   }
 
   private logAgentRegistry() {
@@ -2471,6 +2915,20 @@ export class PiConductorApp {
     })
     const readinessLabel = formatWorkspaceReadinessLabel(readiness)
     const mergeLabel = workspace && mergeState ? mergeChecklistSummaryLabel(mergeState.evaluation) : "blocked · no workspace"
+    const prView = workspace ? this.prViewByWorkspace.get(workspace.id) ?? null : null
+    const prChecksLabel = prView ? summarizePrChecks(prView.checks).label : "unknown"
+    const prLabel = prView
+      ? `#${prView.number ?? "?"} ${prView.state ?? "<unknown>"}${prView.isDraft ? " (draft)" : ""} · ${prChecksLabel}`
+      : "<none>"
+    const runtime = workspace ? this.getWorkspaceRuntimeState(workspace.id) : null
+    const runtimeStatsLabel = runtime ? `turns ${runtime.turnCount} · tools ${runtime.toolCallCount}` : "<none>"
+    const runtimeSessionLabel = runtime
+      ? `user ${runtime.userMessages} · assistant ${runtime.assistantMessages} · tool calls ${runtime.sessionToolCalls}`
+      : "<none>"
+    const runtimeUsageLabel = runtime
+      ? `${runtime.tokensTotal.toLocaleString()} tokens · $${runtime.costTotal.toFixed(4)}`
+      : "<none>"
+    const lastTurnLabel = runtime?.lastTurnAt ?? "<none>"
 
     const agentStatus = agent?.status ?? "stopped"
     const turnInFlight = mergeState?.turnInFlight ?? false
@@ -2491,10 +2949,15 @@ export class PiConductorApp {
       `branch     ${workspace?.branch ?? "<none>"}`,
       `agent      ${agentStatusLabel}${agent?.pid ? ` (pid ${agent.pid})` : ""}`,
       `activity   ${activityTime}`,
+      `pr         ${prLabel}`,
       `run        ${runState} · mode=${this.runMode}`,
       `tests      ${testStatus}`,
       `readiness  ${readinessLabel}`,
       `merge      ${mergeLabel}`,
+      `stats      ${runtimeStatsLabel}`,
+      `session    ${runtimeSessionLabel}`,
+      `usage      ${runtimeUsageLabel}`,
+      `last_turn  ${lastTurnLabel}`,
       `changes    ${changedCount} files`,
     ]
 

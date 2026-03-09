@@ -208,6 +208,73 @@ export function removeWorktree(params: { repoRoot: string; worktreePath: string;
   runAllowError("git", ["-C", params.repoRoot, "worktree", "prune"])
 }
 
+export interface WorktreeRefRecord {
+  path: string
+  branch: string | null
+}
+
+export function parseWorktreePorcelain(text: string): WorktreeRefRecord[] {
+  const lines = text.split(/\r?\n/)
+  const records: WorktreeRefRecord[] = []
+
+  let currentPath: string | null = null
+  let currentBranch: string | null = null
+
+  const flush = () => {
+    if (!currentPath) {
+      return
+    }
+
+    records.push({
+      path: currentPath,
+      branch: currentBranch,
+    })
+
+    currentPath = null
+    currentBranch = null
+  }
+
+  for (const line of lines) {
+    const trimmed = line.trim()
+    if (!trimmed) {
+      flush()
+      continue
+    }
+
+    if (trimmed.startsWith("worktree ")) {
+      flush()
+      currentPath = trimmed.slice("worktree ".length).trim()
+      continue
+    }
+
+    if (trimmed.startsWith("branch ")) {
+      const rawBranch = trimmed.slice("branch ".length).trim()
+      currentBranch = rawBranch.startsWith("refs/heads/") ? rawBranch.slice("refs/heads/".length) : rawBranch
+    }
+  }
+
+  flush()
+  return records
+}
+
+export function listWorktrees(repoRoot: string): WorktreeRefRecord[] {
+  const result = runAllowError("git", ["-C", repoRoot, "worktree", "list", "--porcelain"])
+  if (result.status !== 0) {
+    return []
+  }
+
+  return parseWorktreePorcelain(String(result.stdout ?? ""))
+}
+
+export function findWorktreeByPath(repoRoot: string, worktreePath: string): WorktreeRefRecord | null {
+  const normalized = path.resolve(worktreePath)
+  return listWorktrees(repoRoot).find((entry) => path.resolve(entry.path) === normalized) ?? null
+}
+
+export function findWorktreeByBranch(repoRoot: string, branch: string): WorktreeRefRecord | null {
+  return listWorktrees(repoRoot).find((entry) => entry.branch === branch) ?? null
+}
+
 export function getChangedFiles(worktreePath: string): string[] {
   const output = runAllowError("git", ["-C", worktreePath, "status", "--porcelain=v1"], worktreePath)
   const text = String(output.stdout ?? "")

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { parsePorcelainStatusLine, slugify } from "../src/vcs/git"
+import { parsePorcelainStatusLine, parseWorktreePorcelain, slugify } from "../src/vcs/git"
 
 describe("slugify", () => {
   it("normalizes mixed case and punctuation", () => {
@@ -32,5 +32,25 @@ describe("parsePorcelainStatusLine", () => {
       status: "R",
       file: "README.md",
     })
+  })
+})
+
+describe("parseWorktreePorcelain", () => {
+  it("parses worktree paths and branches", () => {
+    const parsed = parseWorktreePorcelain([
+      "worktree /repo",
+      "HEAD 123",
+      "branch refs/heads/main",
+      "",
+      "worktree /repo/.worktrees/feature",
+      "HEAD 456",
+      "branch refs/heads/pc/feature",
+      "",
+    ].join("\n"))
+
+    expect(parsed).toEqual([
+      { path: "/repo", branch: "main" },
+      { path: "/repo/.worktrees/feature", branch: "pc/feature" },
+    ])
   })
 })

@@ -7,7 +7,9 @@ import type {
   AgentRuntimeStatus,
   MergeChecklistItemRecord,
   RepoRecord,
+  SendMode,
   WorkspaceRecord,
+  WorkspaceRuntimeStateRecord,
 } from "./types"
 
 function nowIso() {
@@ -58,6 +60,25 @@ function mapMergeChecklistItem(row: any): MergeChecklistItemRecord {
     required: Number(row.required) === 1,
     completed: Number(row.completed) === 1,
     createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at),
+  }
+}
+
+function mapWorkspaceRuntimeState(row: any): WorkspaceRuntimeStateRecord {
+  const sendModeRaw = row.send_mode ? String(row.send_mode) : null
+  const sendMode = sendModeRaw === "prompt" || sendModeRaw === "steer" || sendModeRaw === "follow_up" ? sendModeRaw : null
+
+  return {
+    workspaceId: Number(row.workspace_id),
+    sendMode,
+    turnCount: Number(row.turn_count ?? 0),
+    toolCallCount: Number(row.tool_call_count ?? 0),
+    lastTurnAt: row.last_turn_at ? String(row.last_turn_at) : null,
+    userMessages: Number(row.user_messages ?? 0),
+    assistantMessages: Number(row.assistant_messages ?? 0),
+    sessionToolCalls: Number(row.session_tool_calls ?? 0),
+    tokensTotal: Number(row.tokens_total ?? 0),
+    costTotal: Number(row.cost_total ?? 0),
     updatedAt: String(row.updated_at),
   }
 }
@@ -117,6 +138,21 @@ export class Store {
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
         PRIMARY KEY(workspace_id, item_key),
+        FOREIGN KEY(workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
+      );
+
+      CREATE TABLE IF NOT EXISTS workspace_runtime_state (
+        workspace_id INTEGER PRIMARY KEY,
+        send_mode TEXT,
+        turn_count INTEGER NOT NULL DEFAULT 0,
+        tool_call_count INTEGER NOT NULL DEFAULT 0,
+        last_turn_at TEXT,
+        user_messages INTEGER NOT NULL DEFAULT 0,
+        assistant_messages INTEGER NOT NULL DEFAULT 0,
+        session_tool_calls INTEGER NOT NULL DEFAULT 0,
+        tokens_total INTEGER NOT NULL DEFAULT 0,
+        cost_total REAL NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL,
         FOREIGN KEY(workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
       );
     `)
@@ -418,5 +454,89 @@ export class Store {
         WHERE workspace_id = ?
       `)
       .run(workspaceId)
+  }
+
+  getWorkspaceRuntimeState(workspaceId: number): WorkspaceRuntimeStateRecord | null {
+    const row = this.db
+      .query(`
+        SELECT workspace_id, send_mode, turn_count, tool_call_count, last_turn_at,
+               user_messages, assistant_messages, session_tool_calls,
+               tokens_total, cost_total, updated_at
+        FROM workspace_runtime_state
+        WHERE workspace_id = ?
+      `)
+      .get(workspaceId)
+
+    return row ? mapWorkspaceRuntimeState(row) : null
+  }
+
+  listWorkspaceRuntimeStates(): WorkspaceRuntimeStateRecord[] {
+    const rows = this.db
+      .query(`
+        SELECT workspace_id, send_mode, turn_count, tool_call_count, last_turn_at,
+               user_messages, assistant_messages, session_tool_calls,
+               tokens_total, cost_total, updated_at
+        FROM workspace_runtime_state
+        ORDER BY workspace_id ASC
+      `)
+      .all()
+
+    return rows.map(mapWorkspaceRuntimeState)
+  }
+
+  upsertWorkspaceRuntimeState(params: {
+    workspaceId: number
+    sendMode: SendMode | null
+    turnCount: number
+    toolCallCount: number
+    lastTurnAt: string | null
+    userMessages: number
+    assistantMessages: number
+    sessionToolCalls: number
+    tokensTotal: number
+    costTotal: number
+  }): WorkspaceRuntimeStateRecord {
+    const now = nowIso()
+
+    this.db
+      .query(`
+        INSERT INTO workspace_runtime_state(
+          workspace_id, send_mode, turn_count, tool_call_count, last_turn_at,
+          user_messages, assistant_messages, session_tool_calls,
+          tokens_total, cost_total, updated_at
+        )
+        VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(workspace_id) DO UPDATE SET
+          send_mode = excluded.send_mode,
+          turn_count = excluded.turn_count,
+          tool_call_count = excluded.tool_call_count,
+          last_turn_at = excluded.last_turn_at,
+          user_messages = excluded.user_messages,
+          assistant_messages = excluded.assistant_messages,
+          session_tool_calls = excluded.session_tool_calls,
+          tokens_total = excluded.tokens_total,
+          cost_total = excluded.cost_total,
+          updated_at = excluded.updated_at
+      `)
+      .run(
+        params.workspaceId,
+        params.sendMode,
+        params.turnCount,
+        params.toolCallCount,
+        params.lastTurnAt,
+        params.userMessages,
+        params.assistantMessages,
+        params.sessionToolCalls,
+        params.tokensTotal,
+        params.costTotal,
+        now,
+      )
+
+    const next = this.getWorkspaceRuntimeState(params.workspaceId)
+    if (!next) {
+      throw new Error(`Failed to upsert workspace runtime state ${params.workspaceId}`)
+    }
+
+    return next
   }
 }

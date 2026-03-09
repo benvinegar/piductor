@@ -51,13 +51,16 @@ bun run dev
 /workspace new --branch <branch> [name]
 /workspace branches
 /workspace select <id|name>
-/workspace archive
+/workspace archive [--force]
 /workspace archived
 /workspace restore <id|name>
 /agent start [model]
 /agent stop
 /mode <prompt|steer|follow_up>
 /pr create [--dry-run]
+/pr status
+/pr checks
+/pr merge [--merge|--squash|--rebase] [--delete-branch] [--dry-run]
 /run [command]
 /run setup
 /run archive
@@ -81,7 +84,7 @@ Plain text input sends a message to the selected workspace agent using the curre
 
 Type `/` in the composer to open command autocomplete (mouse-select or `Tab` to apply a suggestion).
 
-`/pr create` requires GitHub CLI auth (`gh auth login`) and is blocked if required merge checklist items are incomplete.
+`/pr create` requires GitHub CLI auth (`gh auth login`) and is blocked if required merge checklist items are incomplete. Use `/pr status`, `/pr checks`, and `/pr merge` for full PR lifecycle in-app.
 
 ## Keyboard + mouse controls
 

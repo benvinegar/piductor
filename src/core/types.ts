@@ -42,6 +42,20 @@ export interface MergeChecklistItemRecord {
   updatedAt: string
 }
 
+export interface WorkspaceRuntimeStateRecord {
+  workspaceId: number
+  sendMode: SendMode | null
+  turnCount: number
+  toolCallCount: number
+  lastTurnAt: string | null
+  userMessages: number
+  assistantMessages: number
+  sessionToolCalls: number
+  tokensTotal: number
+  costTotal: number
+  updatedAt: string
+}
+
 export interface ScriptConfig {
   setup?: string
   run?: string
