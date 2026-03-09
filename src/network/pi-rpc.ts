@@ -59,7 +59,7 @@ export class PiRpcProcess {
   async start(): Promise<void> {
     if (this.child) return
 
-    const args = ["--mode", "rpc", "--no-session"]
+    const args = ["--mode", "rpc"]
     if (this.options.model) {
       args.push("--model", this.options.model)
     }
@@ -200,6 +200,15 @@ export class PiRpcProcess {
   async getSessionStats(): Promise<any> {
     const response = await this.sendExpectSuccess({ type: "get_session_stats" })
     return response.data
+  }
+
+  async getMessages(): Promise<any[]> {
+    const response = await this.sendExpectSuccess({ type: "get_messages" })
+    return Array.isArray(response.data?.messages) ? response.data.messages : []
+  }
+
+  async switchSession(sessionPath: string): Promise<void> {
+    await this.sendExpectSuccess({ type: "switch_session", sessionPath })
   }
 
   async setSessionName(name: string): Promise<void> {

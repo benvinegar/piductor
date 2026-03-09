@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs"
+import { existsSync, readFileSync } from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process"
@@ -82,6 +82,7 @@ import { killProcessByPid } from "../agent/process-kill"
 import { UiFlushScheduler } from "./flush-scheduler"
 import { consumeBufferedLines } from "../run/stream-buffer"
 import { DEFAULT_CONVERSATION, toConversationMarkdown as renderConversationMarkdown } from "./conversation-render"
+import { replaySessionMessagesToLogLines } from "./session-replay"
 import {
   clearDraftForWorkspace,
   getWorkspaceSendMode,
@@ -452,6 +453,8 @@ export class PiConductorApp {
   }
 
   private readonly listeners = new Set<() => void>()
+  private lastPersistedRepoId: number | null = null
+  private lastPersistedWorkspaceId: number | null = null
 
   private constructor(renderer: CliRenderer, root: Root, config: AppConfig, store: Store) {
     this.renderer = renderer
@@ -542,6 +545,8 @@ export class PiConductorApp {
       footerText: this.footerText,
     }
 
+    this.persistAppSelectionIfChanged()
+
     for (const listener of this.listeners) {
       listener()
     }
@@ -553,14 +558,79 @@ export class PiConductorApp {
 
     await this.autoAddCurrentRepoIfPossible()
     this.loadWorkspaceRuntimeState()
-    await this.reconcilePersistedAgents()
+    this.hydrateLogsFromPersistedSessions()
     this.reloadRepos()
     this.reloadWorkspaces()
+    this.restoreSelectionFromAppState()
+    await this.reconcilePersistedAgents()
     this.refreshStatusPanel()
     this.refreshDiffPanel()
     this.refreshLogsPanel()
     this.refreshTerminalPanel()
     this.emitSnapshot()
+  }
+
+  private persistAppSelectionIfChanged() {
+    if (this.selectedRepoId === this.lastPersistedRepoId && this.selectedWorkspaceId === this.lastPersistedWorkspaceId) {
+      return
+    }
+
+    this.store.setAppState({
+      selectedRepoId: this.selectedRepoId,
+      selectedWorkspaceId: this.selectedWorkspaceId,
+    })
+
+    this.lastPersistedRepoId = this.selectedRepoId
+    this.lastPersistedWorkspaceId = this.selectedWorkspaceId
+  }
+
+  private restoreSelectionFromAppState() {
+    const state = this.store.getAppState()
+    if (!state) {
+      return
+    }
+
+    this.lastPersistedRepoId = state.selectedRepoId
+    this.lastPersistedWorkspaceId = state.selectedWorkspaceId
+
+    const preferredWorkspace =
+      state.selectedWorkspaceId !== null ? this.store.getWorkspaceById(state.selectedWorkspaceId) : null
+
+    if (preferredWorkspace && preferredWorkspace.status === "active") {
+      this.selectedRepoId = preferredWorkspace.repoId
+      this.expandedRepoIds.add(preferredWorkspace.repoId)
+      this.reloadRepos(preferredWorkspace.repoId)
+      this.reloadWorkspaces(preferredWorkspace.id)
+      return
+    }
+
+    const hasPreferredRepo =
+      state.selectedRepoId !== null && this.repos.some((repo) => repo.id === state.selectedRepoId)
+
+    if (hasPreferredRepo) {
+      this.selectedRepoId = state.selectedRepoId
+      this.expandedRepoIds.add(state.selectedRepoId as number)
+      this.reloadRepos(state.selectedRepoId)
+      this.reloadWorkspaces()
+    }
+  }
+
+  private hydrateLogsFromPersistedSessions() {
+    for (const runtime of this.runtimeStateByWorkspace.values()) {
+      if (!runtime.sessionFile || !existsSync(runtime.sessionFile)) {
+        continue
+      }
+
+      try {
+        const text = readFileSync(runtime.sessionFile, "utf8")
+        const restored = replaySessionMessagesToLogLines(text, this.config.maxLogLines)
+        if (restored.length > 0) {
+          this.logsByStream.set(runtime.workspaceId, restored)
+        }
+      } catch {
+        // Ignore session replay failures and continue startup.
+      }
+    }
   }
 
   public toggleLeftSidebar() {
@@ -1810,15 +1880,34 @@ export class PiConductorApp {
 
     try {
       await agent.start()
+
+      const runtime = this.getWorkspaceRuntimeState(workspaceId)
+      const resumeSessionFile = runtime.sessionFile
+      if (resumeSessionFile && existsSync(resumeSessionFile)) {
+        try {
+          await agent.switchSession(resumeSessionFile)
+          this.appendWorkspaceLog(workspaceId, `[agent] resumed session from ${resumeSessionFile}`)
+        } catch (error) {
+          this.appendWorkspaceLog(workspaceId, `[agent] failed to resume session: ${safeErr(error)}`)
+        }
+      }
+
       await agent.setSessionName(workspace.name)
 
       const state = await agent.getState()
+      const sessionFile =
+        typeof state?.sessionFile === "string" && state.sessionFile.trim().length > 0 ? state.sessionFile.trim() : null
+
       this.store.setAgentState({
         workspaceId,
         status: "running",
         pid: agent.pid,
         model: model ?? null,
         sessionId: state?.sessionId ?? null,
+      })
+
+      this.setWorkspaceRuntimeState(workspaceId, {
+        sessionFile,
       })
 
       this.appendWorkspaceLog(workspaceId, `[agent] started (pid=${agent.pid ?? "?"}).`)
@@ -2167,11 +2256,13 @@ export class PiConductorApp {
 
       const tokensTotalRaw = Number(stats?.tokens?.total)
       const costTotalRaw = Number(stats?.cost)
+      const sessionFile = typeof stats?.sessionFile === "string" && stats.sessionFile.trim().length > 0 ? stats.sessionFile.trim() : runtime.sessionFile
 
       this.setWorkspaceRuntimeState(workspaceId, {
         userMessages,
         assistantMessages,
         sessionToolCalls,
+        sessionFile,
         tokensTotal: Number.isFinite(tokensTotalRaw) ? tokensTotalRaw : runtime.tokensTotal,
         costTotal: Number.isFinite(costTotalRaw) ? costTotalRaw : runtime.costTotal,
       })
@@ -2698,6 +2789,7 @@ export class PiConductorApp {
     const fresh: WorkspaceRuntimeStateRecord = {
       workspaceId,
       sendMode: null,
+      sessionFile: null,
       turnCount: 0,
       toolCallCount: 0,
       lastTurnAt: null,
@@ -2726,6 +2818,7 @@ export class PiConductorApp {
     this.store.upsertWorkspaceRuntimeState({
       workspaceId,
       sendMode: next.sendMode,
+      sessionFile: next.sessionFile,
       turnCount: next.turnCount,
       toolCallCount: next.toolCallCount,
       lastTurnAt: next.lastTurnAt,

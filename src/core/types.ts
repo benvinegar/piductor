@@ -45,6 +45,7 @@ export interface MergeChecklistItemRecord {
 export interface WorkspaceRuntimeStateRecord {
   workspaceId: number
   sendMode: SendMode | null
+  sessionFile: string | null
   turnCount: number
   toolCallCount: number
   lastTurnAt: string | null
@@ -53,6 +54,12 @@ export interface WorkspaceRuntimeStateRecord {
   sessionToolCalls: number
   tokensTotal: number
   costTotal: number
+  updatedAt: string
+}
+
+export interface AppStateRecord {
+  selectedRepoId: number | null
+  selectedWorkspaceId: number | null
   updatedAt: string
 }
 
