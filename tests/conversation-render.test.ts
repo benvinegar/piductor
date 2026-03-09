@@ -3,19 +3,26 @@ import {
   DEFAULT_CONVERSATION,
   formatAssistantMessageRail,
   formatUserMessageBox,
+  toConversationBlocks,
   toConversationMarkdown,
 } from "../src/ui/conversation-render"
 
 describe("conversation-render", () => {
   it("returns default conversation when empty", () => {
     expect(toConversationMarkdown([])).toBe(DEFAULT_CONVERSATION)
+    expect(toConversationBlocks([])).toEqual([])
   })
 
-  it("renders user prompts in a boxed block", () => {
-    const box = formatUserMessageBox("hello")
-    expect(box).toContain("╭")
-    expect(box).toContain("│ hello")
-    expect(box).toContain("╰")
+  it("keeps user prompts as plain text blocks", () => {
+    expect(formatUserMessageBox("hello   ")).toBe("hello")
+
+    const blocks = toConversationBlocks(["[12:00:00] [you/prompt] hello world"])
+    expect(blocks).toEqual([
+      {
+        kind: "user",
+        text: "hello world",
+      },
+    ])
   })
 
   it("passes assistant markdown through without forced quote markers", () => {
@@ -23,7 +30,7 @@ describe("conversation-render", () => {
     expect(output).toBe("**bold**\n- item")
   })
 
-  it("keeps markdown tokens in assistant output and separates message blocks", () => {
+  it("uses blank lines between messages instead of divider lines", () => {
     const rendered = toConversationMarkdown([
       "[12:00:00] [you/prompt] start",
       "[12:00:01] **Repo tour**",
@@ -31,9 +38,11 @@ describe("conversation-render", () => {
       "[12:00:03] second reply",
     ])
 
+    expect(rendered).toContain("**You:** start")
     expect(rendered).toContain("**Repo tour**")
     expect(rendered).toContain("second reply")
-    expect(rendered).toContain("────────")
+    expect(rendered).not.toContain("...")
+    expect(rendered).not.toContain("────")
   })
 
   it("keeps the latest user prompt visible when assistant output exceeds the render window", () => {

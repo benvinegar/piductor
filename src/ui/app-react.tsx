@@ -81,7 +81,12 @@ import { planAgentReconnect } from "../agent/reconnect"
 import { killProcessByPid } from "../agent/process-kill"
 import { UiFlushScheduler } from "./flush-scheduler"
 import { consumeBufferedLines } from "../run/stream-buffer"
-import { DEFAULT_CONVERSATION, toConversationMarkdown as renderConversationMarkdown } from "./conversation-render"
+import {
+  DEFAULT_CONVERSATION,
+  toConversationBlocks as renderConversationBlocks,
+  toConversationMarkdown as renderConversationMarkdown,
+  type ConversationBlock,
+} from "./conversation-render"
 import { summarizeToolCall, summarizeToolError } from "./agent-activity"
 import { replaySessionMessagesToLogLines } from "./session-replay"
 import {
@@ -199,6 +204,7 @@ export interface AppSnapshot {
   headerText: string
   statusText: string
   conversationTabsText: string
+  conversationBlocks: ConversationBlock[]
   conversationMarkdown: string
   commandModalVisible: boolean
   commandModalTitle: string
@@ -391,6 +397,7 @@ export class PiConductorApp {
   private statusText = "repo       <none>"
   private diffModalVisible = false
   private conversationTabsText = " All changes · Review branch changes · Debugging"
+  private conversationBlocks: ConversationBlock[] = []
   private conversationMarkdown = DEFAULT_CONVERSATION
   private commandModalVisible = false
   private commandModalTitle = ""
@@ -434,6 +441,7 @@ export class PiConductorApp {
     headerText: this.headerText,
     statusText: this.statusText,
     conversationTabsText: this.conversationTabsText,
+    conversationBlocks: [],
     conversationMarkdown: this.conversationMarkdown,
     commandModalVisible: this.commandModalVisible,
     commandModalTitle: this.commandModalTitle,
@@ -527,6 +535,7 @@ export class PiConductorApp {
       headerText: this.headerText,
       statusText: this.statusText,
       conversationTabsText: this.conversationTabsText,
+      conversationBlocks: this.conversationBlocks.map((block) => ({ ...block })),
       conversationMarkdown: this.conversationMarkdown,
       commandModalVisible: this.commandModalVisible,
       commandModalTitle: this.commandModalTitle,
@@ -2313,7 +2322,6 @@ export class PiConductorApp {
   private appendThinkingLine(workspaceId: number, line: string) {
     const normalized = line.replace(/\t/g, "  ").trimEnd()
     if (normalized.length === 0) {
-      this.appendWorkspaceLog(workspaceId, "[thinking]")
       return
     }
 
@@ -3092,6 +3100,10 @@ export class PiConductorApp {
     this.footerText = `repos=${this.repos.length} workspaces=${this.workspaces.length} · data=${this.config.dataDir} · pi=${this.config.piCommand}`
   }
 
+  private toConversationBlocks(lines: string[]): ConversationBlock[] {
+    return renderConversationBlocks(lines)
+  }
+
   private toConversationMarkdown(lines: string[]): string {
     return renderConversationMarkdown(lines)
   }
@@ -3100,6 +3112,7 @@ export class PiConductorApp {
     const selectedWorkspace = this.getSelectedWorkspace()
     const streamId = selectedWorkspace?.id ?? GLOBAL_LOG_STREAM_ID
     const lines = this.logsByStream.get(streamId) ?? []
+    this.conversationBlocks = this.toConversationBlocks(lines)
     this.conversationMarkdown = this.toConversationMarkdown(lines)
   }
 
@@ -3383,6 +3396,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
     ? `${composerSpinner || "•"} Thinking${snapshot.thinkingPreview ? ` · ${snapshot.thinkingPreview}` : "…"}`
     : ""
   const centerMarkdown = snapshot.conversationMarkdown
+  const conversationBlocks = snapshot.conversationBlocks
   const composerFirstLine = composerText.split(/\r?\n/, 1)[0] ?? ""
   const hasSlashCommandPrefix = composerFirstLine.trimStart().startsWith("/")
   const commandQuery = hasSlashCommandPrefix ? composerFirstLine.trimStart().slice(1) : ""
@@ -4237,13 +4251,51 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                 backgroundColor: "transparent",
               }}
             >
-              <markdown
-                id="pc-conversation-markdown"
-                content={centerMarkdown}
-                syntaxStyle={conversationSyntaxStyle}
-                conceal
-                width="100%"
-              />
+              {conversationBlocks.length === 0 ? (
+                <markdown
+                  id="pc-conversation-markdown-empty"
+                  content={centerMarkdown}
+                  syntaxStyle={conversationSyntaxStyle}
+                  conceal
+                  width="100%"
+                />
+              ) : (
+                conversationBlocks.map((block, index) => {
+                  const isLast = index === conversationBlocks.length - 1
+                  if (block.kind === "user") {
+                    return (
+                      <box
+                        key={`pc-conversation-user-${index}`}
+                        width="100%"
+                        backgroundColor="#1e293b"
+                        style={{
+                          flexDirection: "column",
+                          flexShrink: 0,
+                          marginBottom: isLast ? 0 : 1,
+                          paddingLeft: 1,
+                          paddingRight: 1,
+                        }}
+                      >
+                        <text content={block.text} fg="#e2e8f0" wrapMode="word" width="100%" />
+                      </box>
+                    )
+                  }
+
+                  return (
+                    <box
+                      key={`pc-conversation-markdown-${index}`}
+                      width="100%"
+                      style={{
+                        flexDirection: "column",
+                        flexShrink: 0,
+                        marginBottom: isLast ? 0 : 1,
+                      }}
+                    >
+                      <markdown content={block.markdown} syntaxStyle={conversationSyntaxStyle} conceal width="100%" />
+                    </box>
+                  )
+                })
+              )}
 
               {snapshot.thinkingActive && (
                 <text

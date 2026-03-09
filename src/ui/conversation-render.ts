@@ -1,6 +1,15 @@
 export const DEFAULT_CONVERSATION = "_No conversation yet. Start an agent and send a prompt._"
-const MESSAGE_SPACER = "────────────────────────────────────────────────────────────────────────────"
 const MAX_RENDER_LINES = 300
+
+export type ConversationBlock =
+  | {
+      kind: "user"
+      text: string
+    }
+  | {
+      kind: "markdown"
+      markdown: string
+    }
 
 function stripTimestamp(line: string): string {
   return line.replace(/^\[\d{2}:\d{2}:\d{2}\]\s*/, "")
@@ -18,20 +27,7 @@ function findLastUserLineIndex(lines: string[]): number {
 }
 
 export function formatUserMessageBox(content: string): string {
-  const rawLines = content.split(/\r?\n/).map((line) => line.trimEnd())
-  const lines = rawLines.length > 0 ? rawLines : [""]
-  const longest = Math.max(...lines.map((line) => line.length), 8)
-  const width = Math.min(72, Math.max(8, longest))
-
-  const clipped = lines.map((line) => {
-    if (line.length <= width) return line
-    return `${line.slice(0, Math.max(0, width - 1))}…`
-  })
-
-  const top = `╭${"─".repeat(width + 2)}╮`
-  const body = clipped.map((line) => `│ ${line}${" ".repeat(Math.max(0, width - line.length))} │`)
-  const bottom = `╰${"─".repeat(width + 2)}╯`
-  return [top, ...body, bottom].join("\n")
+  return content.trimEnd()
 }
 
 export function formatAssistantMessageRail(content: string): string {
@@ -49,13 +45,9 @@ function extractTaggedContent(line: string, tag: string): string | null {
 }
 
 function normalizeThinkingLine(content: string): string {
-  const trimmed = content.trimStart()
+  const trimmed = content.trim()
   if (trimmed.length === 0) {
     return ""
-  }
-
-  if (/^[─-]{4,}$/.test(trimmed)) {
-    return MESSAGE_SPACER
   }
 
   if (trimmed.startsWith("•") || trimmed.startsWith("└") || trimmed.startsWith(">")) {
@@ -65,12 +57,12 @@ function normalizeThinkingLine(content: string): string {
   return `• ${trimmed}`
 }
 
-export function toConversationMarkdown(lines: string[]): string {
+export function toConversationBlocks(lines: string[]): ConversationBlock[] {
   if (lines.length === 0) {
-    return DEFAULT_CONVERSATION
+    return []
   }
 
-  const rendered: string[] = []
+  const rendered: ConversationBlock[] = []
   let pendingAssistant: string[] = []
   let pendingTimeline: string[] = []
   let toolSectionOpen = false
@@ -88,22 +80,26 @@ export function toConversationMarkdown(lines: string[]): string {
 
   const flushAssistant = () => {
     if (pendingAssistant.length === 0) return
-    rendered.push(formatAssistantMessageRail(pendingAssistant.join("\n")))
+    rendered.push({
+      kind: "markdown",
+      markdown: formatAssistantMessageRail(pendingAssistant.join("\n")),
+    })
     pendingAssistant = []
   }
 
   const flushTimeline = () => {
     if (pendingTimeline.length === 0) return
-    rendered.push(pendingTimeline.join("\n"))
+    rendered.push({
+      kind: "markdown",
+      markdown: pendingTimeline.join("\n"),
+    })
     pendingTimeline = []
     toolSectionOpen = false
   }
 
   const appendThinking = (content: string) => {
-    const normalized = normalizeThinkingLine(content.trimEnd())
+    const normalized = normalizeThinkingLine(content)
     if (normalized.length === 0) {
-      pushTimelineLine("")
-      toolSectionOpen = false
       return
     }
 
@@ -117,7 +113,7 @@ export function toConversationMarkdown(lines: string[]): string {
 
   const appendTool = (content: string, isError: boolean) => {
     if (!toolSectionOpen) {
-      if (pendingTimeline.length > 0) {
+      if (pendingTimeline.length > 0 && pendingTimeline[pendingTimeline.length - 1] !== "") {
         pushTimelineLine("")
       }
       pushTimelineLine("• Explored")
@@ -151,7 +147,10 @@ export function toConversationMarkdown(lines: string[]): string {
       flushAssistant()
       flushTimeline()
       const content = line.replace(/^\[you\/[\w_\-]+\]\s*/, "")
-      rendered.push(`\`\`\`text\n${formatUserMessageBox(content)}\n\`\`\``)
+      rendered.push({
+        kind: "user",
+        text: formatUserMessageBox(content),
+      })
       continue
     }
 
@@ -186,14 +185,14 @@ export function toConversationMarkdown(lines: string[]): string {
       flushAssistant()
       flushTimeline()
       const content = line.replace(/^\[pi:stderr\]\s*/, "")
-      rendered.push(`> ⚠️ ${content}`)
+      rendered.push({ kind: "markdown", markdown: `> ⚠️ ${content}` })
       continue
     }
 
     if (line.startsWith("ERROR:")) {
       flushAssistant()
       flushTimeline()
-      rendered.push(`> ❌ ${line}`)
+      rendered.push({ kind: "markdown", markdown: `> ❌ ${line}` })
       continue
     }
 
@@ -201,14 +200,14 @@ export function toConversationMarkdown(lines: string[]): string {
       flushAssistant()
       flushTimeline()
       const content = line.replace(/^\[system\]\s*/, "")
-      rendered.push(`> ℹ️ ${content}`)
+      rendered.push({ kind: "markdown", markdown: `> ℹ️ ${content}` })
       continue
     }
 
     if (line.startsWith("[extension-ui]")) {
       flushAssistant()
       flushTimeline()
-      rendered.push(`> ℹ️ Agent requested extension UI input.`)
+      rendered.push({ kind: "markdown", markdown: "> ℹ️ Agent requested extension UI input." })
       continue
     }
 
@@ -228,5 +227,19 @@ export function toConversationMarkdown(lines: string[]): string {
   flushAssistant()
   flushTimeline()
 
-  return rendered.join(`\n\n${MESSAGE_SPACER}\n\n`) || DEFAULT_CONVERSATION
+  return rendered
+}
+
+export function toConversationMarkdown(lines: string[]): string {
+  const blocks = toConversationBlocks(lines)
+  if (blocks.length === 0) {
+    return DEFAULT_CONVERSATION
+  }
+
+  return (
+    blocks
+      .map((block) => (block.kind === "user" ? `**You:** ${block.text}` : block.markdown))
+      .filter((value) => value.trim().length > 0)
+      .join("\n\n") || DEFAULT_CONVERSATION
+  )
 }
