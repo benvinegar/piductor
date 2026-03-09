@@ -50,7 +50,7 @@ Treat this as a deliberate split:
 
 - 3-column layout: left navigator, center conversation+composer, right status/review/run
 - Top bar with left/right collapse toggles
-- Sidebars collapsible via mouse + keyboard + `/ui` command
+- Sidebars collapsible via mouse + `/ui` command (keyboard shortcuts are optional)
 - Side columns resizable via draggable vertical separators
 - Conversation panel uses markdown rendering, including:
   - `### You` / `### Pi`
@@ -68,7 +68,7 @@ Treat this app like a **desktop-style interface implemented in a terminal**.
 
 - Prefer interaction patterns from desktop apps (modal overlays, focused detail panes, explicit selection states).
 - When OpenTUI provides a specialized renderable (e.g. `diff`, `code`, `line-number`), prefer that over plain markdown/text emulation.
-- Keep keyboard-first parity for all major interactions (mouse is additive, not required).
+- Mouse interaction is required for all major interactions (keyboard support is optional).
 - Design for terminal constraints:
   - fixed-width cells,
   - limited color fidelity,
@@ -133,9 +133,9 @@ Right sidebar:
 
 - Resizer remains the visual separator between columns (1-cell draggable bar).
 - Drag robustness uses body-level mouse handlers; preserve this approach.
-- `Ctrl+1` / `Ctrl+2` should reveal and focus the left workspace tree even if the section is collapsed.
+- `Ctrl+1` / `Ctrl+2` shortcuts can be kept for power users, but must not be required to use the UI.
 - Clicking a repo row in the workspace tree should expand/collapse that repo and keep workspace ownership visually explicit.
-- Any new mouse interaction should still have keyboard/command fallback where practical.
+- Any new interaction must be fully operable with the mouse; keyboard/command fallback is optional.
 
 ## Command surface (keep backward compatible)
 
@@ -166,7 +166,7 @@ If you add/rename commands, update:
 For any UI/interaction change, run your own verification in the live TUI session:
 
 - Use tmux pane controls to interact with the running app (`tmux send-keys`, `tmux capture-pane`).
-- Validate the specific interaction changed (e.g. click/keyboard selection, collapse/expand, resize).
+- Validate the specific interaction changed (e.g. click selection, collapse/expand, resize).
 - Confirm no obvious regressions in adjacent flows (focus, command input, sidebar toggles).
 - Report what was tested and the observed result in the final summary.
 
