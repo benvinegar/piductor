@@ -152,19 +152,6 @@ function extractTaggedContent(line: string, tag: string): string | null {
   return content.startsWith(" ") ? content.slice(1) : content
 }
 
-function normalizeThinkingLine(content: string): string {
-  const trimmed = content.trim()
-  if (trimmed.length === 0) {
-    return ""
-  }
-
-  if (trimmed.startsWith("•") || trimmed.startsWith("└") || trimmed.startsWith(">")) {
-    return trimmed
-  }
-
-  return `• ${trimmed}`
-}
-
 export function toConversationBlocks(lines: string[]): ConversationBlock[] {
   if (lines.length === 0) {
     return []
@@ -203,20 +190,6 @@ export function toConversationBlocks(lines: string[]): ConversationBlock[] {
     })
     pendingTimeline = []
     toolSectionOpen = false
-  }
-
-  const appendThinking = (content: string) => {
-    const normalized = normalizeThinkingLine(content)
-    if (normalized.length === 0) {
-      return
-    }
-
-    if (toolSectionOpen) {
-      pushTimelineLine("")
-      toolSectionOpen = false
-    }
-
-    pushTimelineLine(normalized)
   }
 
   const appendTool = (content: string, isError: boolean) => {
@@ -264,8 +237,6 @@ export function toConversationBlocks(lines: string[]): ConversationBlock[] {
 
     const thinking = extractTaggedContent(line, "thinking")
     if (thinking !== null) {
-      flushAssistant()
-      appendThinking(thinking)
       continue
     }
 

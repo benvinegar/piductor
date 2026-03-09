@@ -19,7 +19,7 @@ describe("replaySessionMessagesToLogLines", () => {
     expect(lines).toEqual(["[you/prompt] hello", "hi there", "[assistant-break]"])
   })
 
-  it("replays assistant thinking and tool calls", () => {
+  it("skips assistant thinking and replays tool calls", () => {
     const jsonl = JSON.stringify({
       type: "message",
       message: {
@@ -33,12 +33,7 @@ describe("replaySessionMessagesToLogLines", () => {
     })
 
     const lines = replaySessionMessagesToLogLines(jsonl)
-    expect(lines).toEqual([
-      "[thinking] check references",
-      "[tool] Read `src/events.ts`",
-      "Done",
-      "[assistant-break]",
-    ])
+    expect(lines).toEqual(["[tool] Read `src/events.ts`", "Done", "[assistant-break]"])
   })
 
   it("replays tool result errors", () => {

@@ -49,7 +49,6 @@ function replayAssistantContent(lines: string[], content: unknown) {
     const block = blockValue as SessionContentBlock
 
     if (block.type === "thinking" && typeof block.thinking === "string") {
-      appendNonEmptyLines(lines, block.thinking, "[thinking] ")
       continue
     }
 

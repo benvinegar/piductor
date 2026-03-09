@@ -78,7 +78,7 @@ describe("conversation-render", () => {
     expect(rendered).toContain("\n- Developer-focused CRM")
   })
 
-  it("renders thinking and tool activity as a persistent timeline", () => {
+  it("suppresses thinking text and keeps tool activity timeline", () => {
     const lines = [
       "[12:00:00] [thinking] I found the stale value source",
       "[12:00:01] [tool] Read `ingest-client.ts`",
@@ -89,14 +89,14 @@ describe("conversation-render", () => {
     const rendered = toConversationMarkdown(lines)
     const blocks = toConversationBlocks(lines)
 
-    expect(rendered).toContain("• I found the stale value source")
+    expect(rendered).not.toContain("stale value source")
     expect(rendered).toContain("• Explored")
     expect(rendered).toContain("└ Read `ingest-client.ts`")
     expect(rendered).toContain("└ Search `clientName`")
     expect(rendered).toContain("Final answer")
     expect(blocks[0]).toEqual({
       kind: "activity",
-      text: "• I found the stale value source\n\n• Explored\n  └ Read `ingest-client.ts`\n  └ Search `clientName`",
+      text: "• Explored\n  └ Read `ingest-client.ts`\n  └ Search `clientName`",
     })
     expect(blocks[1]).toEqual({
       kind: "assistant",

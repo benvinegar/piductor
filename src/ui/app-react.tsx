@@ -2305,7 +2305,6 @@ export class PiConductorApp {
     let previewSource = consumed.remainder
 
     for (const line of consumed.lines) {
-      this.appendThinkingLine(workspaceId, line)
       if (line.trim().length > 0) {
         previewSource = line
       }
@@ -2319,20 +2318,10 @@ export class PiConductorApp {
     }
   }
 
-  private appendThinkingLine(workspaceId: number, line: string) {
-    const normalized = line.replace(/\t/g, "  ").trimEnd()
-    if (normalized.length === 0) {
-      return
-    }
-
-    this.appendWorkspaceLog(workspaceId, `[thinking] ${normalized}`)
-  }
-
   private flushThinkingPartial(workspaceId: number, persist = true) {
     const partial = this.thinkingPartialByWorkspace.get(workspaceId) ?? ""
 
     if (persist && partial.trim().length > 0) {
-      this.appendThinkingLine(workspaceId, partial)
       const preview = compactThinkingPreview(partial)
       if (preview.length > 0) {
         this.lastThinkingPreviewByWorkspace.set(workspaceId, preview)
