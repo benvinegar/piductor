@@ -3141,6 +3141,9 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
             height={6}
             backgroundColor="#151922"
             shouldFill
+            onMouseDown={() => {
+              setFocusTarget("input")
+            }}
             style={{
               flexShrink: 0,
               paddingLeft: 1,
@@ -3161,6 +3164,9 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
               id="pc-input"
               ref={composerRef}
               focused={focusTarget === "input"}
+              onMouseDown={() => {
+                setFocusTarget("input")
+              }}
               placeholder="Ask the selected Pi workspace to do something…"
               onSubmit={() => {
                 const submitted = composerRef.current?.plainText ?? ""
