@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import {
   encodeWorkspaceTreeRowMeta,
   formatWorkspaceActivityAge,
-  formatWorkspaceStatusLabel,
+  formatWorkspaceRuntimeLabel,
   formatWorkspaceTreeRowName,
   parseWorkspaceTreeRowMeta,
   parseWorkspaceTreeValue,
@@ -51,7 +51,7 @@ describe("workspace-tree helpers", () => {
         added: 12,
         removed: 4,
       }),
-    ).toBe("  pc/feature-a")
+    ).toBe("feature-a")
   })
 
   it("encodes and parses workspace row metadata", () => {
@@ -59,6 +59,7 @@ describe("workspace-tree helpers", () => {
       added: 12,
       removed: 4,
       status: "running",
+      busy: true,
       activityAt: "2026-03-08T23:45:00.000Z",
     })
 
@@ -66,6 +67,7 @@ describe("workspace-tree helpers", () => {
       added: 12,
       removed: 4,
       status: "running",
+      busy: true,
       activityAt: "2026-03-08T23:45:00.000Z",
     })
 
@@ -73,15 +75,17 @@ describe("workspace-tree helpers", () => {
       added: 0,
       removed: 0,
       status: "stopped",
+      busy: false,
       activityAt: null,
     })
   })
 
-  it("formats status labels and relative activity age", () => {
-    expect(formatWorkspaceStatusLabel("starting")).toBe("starting")
-    expect(formatWorkspaceStatusLabel("running")).toBe("running")
-    expect(formatWorkspaceStatusLabel("error")).toBe("error")
-    expect(formatWorkspaceStatusLabel("stopped")).toBe("stopped")
+  it("formats runtime labels and relative activity age", () => {
+    expect(formatWorkspaceRuntimeLabel("starting", false)).toBe("busy")
+    expect(formatWorkspaceRuntimeLabel("running", true)).toBe("busy")
+    expect(formatWorkspaceRuntimeLabel("running", false)).toBe("active")
+    expect(formatWorkspaceRuntimeLabel("error", false)).toBe("error")
+    expect(formatWorkspaceRuntimeLabel("stopped", false)).toBe("stopped")
 
     const now = Date.parse("2026-03-08T23:50:00.000Z")
     expect(formatWorkspaceActivityAge("2026-03-08T23:49:58.000Z", now)).toBe("now")

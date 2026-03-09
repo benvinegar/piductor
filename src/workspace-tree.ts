@@ -55,13 +55,14 @@ export function formatWorkspaceTreeRowName(params: {
     return `${params.expanded ? "▾" : "▸"} ${params.repoId} - ${params.repoName ?? "repo"}`
   }
 
-  return `  ${params.branch ?? params.workspaceName ?? "branch"}`
+  return `${params.workspaceName ?? params.branch ?? "workspace"}`
 }
 
 export type WorkspaceTreeRowMeta = {
   added: number
   removed: number
   status: AgentRuntimeStatus
+  busy: boolean
   activityAt: string | null
 }
 
@@ -74,6 +75,7 @@ export function parseWorkspaceTreeRowMeta(raw: unknown): WorkspaceTreeRowMeta {
     added: 0,
     removed: 0,
     status: "stopped",
+    busy: false,
     activityAt: null,
   }
 
@@ -93,6 +95,7 @@ export function parseWorkspaceTreeRowMeta(raw: unknown): WorkspaceTreeRowMeta {
       added: Number.isFinite(parsed.added) ? Number(parsed.added) : 0,
       removed: Number.isFinite(parsed.removed) ? Number(parsed.removed) : 0,
       status: normalizedStatus,
+      busy: Boolean(parsed.busy),
       activityAt: parsed.activityAt ? String(parsed.activityAt) : null,
     }
   } catch {
@@ -100,17 +103,20 @@ export function parseWorkspaceTreeRowMeta(raw: unknown): WorkspaceTreeRowMeta {
   }
 }
 
-export function formatWorkspaceStatusLabel(status: AgentRuntimeStatus): string {
-  switch (status) {
-    case "starting":
-      return "starting"
-    case "running":
-      return "running"
-    case "error":
-      return "error"
-    default:
-      return "stopped"
+export function formatWorkspaceRuntimeLabel(status: AgentRuntimeStatus, busy: boolean): string {
+  if (status === "error") {
+    return "error"
   }
+
+  if (status === "stopped") {
+    return "stopped"
+  }
+
+  if (status === "starting" || busy) {
+    return "busy"
+  }
+
+  return "active"
 }
 
 export function formatWorkspaceActivityAge(activityAt: string | null, nowMs = Date.now()): string {

@@ -15,7 +15,7 @@ import { createRoot, useKeyboard, useTerminalDimensions, type Root } from "@open
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
 import { Store } from "./db"
 import { PiRpcProcess } from "./pi-rpc"
-import type { AgentRuntimeStatus, AppConfig, RepoRecord, SendMode, WorkspaceRecord } from "./types"
+import type { AppConfig, RepoRecord, SendMode, WorkspaceRecord } from "./types"
 import {
   addWorktreeForBranch,
   cloneRepo,
@@ -31,7 +31,7 @@ import {
 import {
   encodeWorkspaceTreeRowMeta,
   formatWorkspaceActivityAge,
-  formatWorkspaceStatusLabel,
+  formatWorkspaceRuntimeLabel,
   formatWorkspaceTreeRowName,
   parseWorkspaceTreeRowMeta,
   parseWorkspaceTreeValue,
@@ -99,11 +99,11 @@ function formatSectionHeader(title: string, collapsed: boolean, width: number): 
   return `${prefix}${"─".repeat(filler)}`
 }
 
-function workspaceStatusColor(status: AgentRuntimeStatus): string {
+function workspaceStatusColor(status: string): string {
   switch (status) {
-    case "running":
+    case "active":
       return "#86efac"
-    case "starting":
+    case "busy":
       return "#93c5fd"
     case "error":
       return "#fca5a5"
@@ -1546,6 +1546,7 @@ export class PiConductorApp {
             added,
             removed,
             status: agent?.status ?? "stopped",
+            busy: this.agentTurnsInFlight.has(workspace.id),
             activityAt,
           }),
           value: workspaceTreeValue(repo.id, workspace.id),
@@ -2378,16 +2379,15 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                       const meta = !isRepoRow ? parseWorkspaceTreeRowMeta(option.description) : null
                       const plusText = meta ? `+${meta.added}` : "+0"
                       const minusText = meta ? `-${meta.removed}` : "-0"
-                      const statusText = meta ? formatWorkspaceStatusLabel(meta.status) : ""
-                      const statusColor = meta ? workspaceStatusColor(meta.status) : "#94a3b8"
-                      const activityText = meta ? formatWorkspaceActivityAge(meta.activityAt) : ""
-                      const marker = isRepoRow ? " " : selected ? "●" : "○"
+                      const statusText = meta ? formatWorkspaceRuntimeLabel(meta.status, meta.busy) : "stopped"
+                      const statusColor = workspaceStatusColor(statusText)
+                      const activityText = meta ? formatWorkspaceActivityAge(meta.activityAt) : "-"
 
                       return (
                         <box
                           key={value}
                           id={`pc-workspace-tree-row-${index}`}
-                          height={1}
+                          height={isRepoRow ? 1 : 2}
                           backgroundColor={selected ? "#1f2937" : "transparent"}
                           onMouseDown={(event) => {
                             event.preventDefault()
@@ -2397,90 +2397,97 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                             app.selectWorkspaceTreeOption(option, true)
                           }}
                           style={{
-                            flexDirection: "row",
-                            alignItems: "center",
+                            flexDirection: "column",
                             flexShrink: 0,
                             marginBottom: isRepoRow ? 0 : 1,
                           }}
                         >
-                          {!isRepoRow && (
+                          {isRepoRow ? (
                             <text
-                              id={`pc-workspace-tree-row-marker-${index}`}
-                              content={marker}
-                              fg={selected ? "#93c5fd" : "#64748b"}
-                              selectable={false}
-                              style={{
-                                flexShrink: 0,
-                                marginRight: 1,
-                              }}
-                            />
-                          )}
-
-                          {!isRepoRow && (
-                            <text
-                              id={`pc-workspace-tree-row-status-${index}`}
-                              content={statusText}
-                              fg={statusColor}
+                              id={`pc-workspace-tree-row-text-${index}`}
+                              content={option.name}
+                              fg={selected ? "#e2e8f0" : "#dbeafe"}
                               wrapMode="none"
-                              selectable={false}
                               style={{
-                                flexShrink: 0,
-                                marginRight: 1,
+                                flexGrow: 1,
+                                flexShrink: 1,
                               }}
                             />
-                          )}
+                          ) : (
+                            <>
+                              <box
+                                id={`pc-workspace-tree-row-top-${index}`}
+                                height={1}
+                                style={{
+                                  flexDirection: "row",
+                                  alignItems: "center",
+                                }}
+                              >
+                                <text
+                                  id={`pc-workspace-tree-row-name-${index}`}
+                                  content={option.name}
+                                  fg={selected ? "#e2e8f0" : "#cbd5e1"}
+                                  wrapMode="none"
+                                  style={{
+                                    flexGrow: 1,
+                                    flexShrink: 1,
+                                  }}
+                                />
+                                <text
+                                  id={`pc-workspace-tree-row-activity-${index}`}
+                                  content={activityText}
+                                  fg="#94a3b8"
+                                  wrapMode="none"
+                                  selectable={false}
+                                  style={{
+                                    flexShrink: 0,
+                                    marginLeft: 1,
+                                  }}
+                                />
+                              </box>
 
-                          <text
-                            id={`pc-workspace-tree-row-text-${index}`}
-                            content={option.name}
-                            fg={selected ? "#e2e8f0" : isRepoRow ? "#dbeafe" : "#cbd5e1"}
-                            wrapMode="none"
-                            style={{
-                              flexGrow: 1,
-                              flexShrink: 1,
-                            }}
-                          />
-
-                          {!isRepoRow && (
-                            <text
-                              id={`pc-workspace-tree-row-activity-${index}`}
-                              content={activityText}
-                              fg="#94a3b8"
-                              wrapMode="none"
-                              selectable={false}
-                              style={{
-                                flexShrink: 0,
-                                marginLeft: 1,
-                                marginRight: 1,
-                              }}
-                            />
-                          )}
-
-                          {!isRepoRow && (
-                            <text
-                              id={`pc-workspace-tree-row-plus-${index}`}
-                              content={plusText}
-                              fg="#86efac"
-                              wrapMode="none"
-                              selectable={false}
-                              style={{
-                                flexShrink: 0,
-                                marginRight: 1,
-                              }}
-                            />
-                          )}
-
-                          {!isRepoRow && (
-                            <text
-                              id={`pc-workspace-tree-row-minus-${index}`}
-                              content={minusText}
-                              fg="#fca5a5"
-                              wrapMode="none"
-                              selectable={false}
-                              style={{
-                                flexShrink: 0,
-                              }}
-                            />
+                              <box
+                                id={`pc-workspace-tree-row-bottom-${index}`}
+                                height={1}
+                                style={{
+                                  flexDirection: "row",
+                                  alignItems: "center",
+                                }}
+                              >
+                                <text
+                                  id={`pc-workspace-tree-row-status-${index}`}
+                                  content={statusText}
+                                  fg={statusColor}
+                                  wrapMode="none"
+                                  selectable={false}
+                                  style={{
+                                    flexGrow: 1,
+                                    flexShrink: 1,
+                                  }}
+                                />
+                                <text
+                                  id={`pc-workspace-tree-row-plus-${index}`}
+                                  content={plusText}
+                                  fg="#86efac"
+                                  wrapMode="none"
+                                  selectable={false}
+                                  style={{
+                                    flexShrink: 0,
+                                    marginRight: 1,
+                                  }}
+                                />
+                                <text
+                                  id={`pc-workspace-tree-row-minus-${index}`}
+                                  content={minusText}
+                                  fg="#fca5a5"
+                                  wrapMode="none"
+                                  selectable={false}
+                                  style={{
+                                    flexShrink: 0,
+                                  }}
+                                />
+                              </box>
+                            </>
                           )}
                         </box>
                       )
