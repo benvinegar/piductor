@@ -65,7 +65,7 @@ bun run dev
 /run mode [concurrent|nonconcurrent]
 /test [command]
 /status
-/diff [open|close|next|prev|hunk <next|prev>|mode [unified|split]|refresh]
+/diff [open|close|next|prev|mode [unified|split]|refresh]
 /ui left|right|toggle
 ```
 
@@ -89,7 +89,7 @@ Plain text input sends a message to the selected workspace agent using the curre
 - Click sidebar section headers to collapse/expand workspace tree, status, changes, and run terminal
 - Click repo rows in the workspace tree to expand/collapse nested workspaces
 - Diff review opens as a modal overlay with mouse controls: click `Mode`, `Close`, `◀/▶ File`, and `◀/▶ Hunk` buttons
-- Optional keyboard shortcuts in diff review (when focus is not in composer): `m` toggle unified/split, `n`/`p` next/prev file, `[`/`]` prev/next hunk, `q` close review
+- Optional keyboard shortcuts in diff review (when focus is not in composer): `Esc` or `q` close review, `m` toggle unified/split, `n`/`p` next/prev file
 
 ## Configuration
 

@@ -46,7 +46,7 @@ import { buildWorkspaceScriptEnv } from "./script-env"
 import { shouldStopExistingRun, stopSignalSequence } from "./run-policy"
 import { normalizeRunMode, parseRunCommandArgs, runCommandUsage, type RunMode } from "./run-command"
 import { formatRunExitSummary, formatRunLogLine } from "./run-log"
-import { selectDiffReviewHunk, type DiffViewMode } from "./diff-review"
+import { parseFileDiff, type DiffViewMode } from "./diff-review"
 import { formatTestRunStatus, nextTestRunFinished, nextTestRunStarted, type TestRunState } from "./test-status"
 import { LOADING_TOKEN, renderLoadingTokens } from "./loading"
 import { sanitizePiStderrLine, shouldSurfacePiStderr } from "./pi-stderr"
@@ -609,7 +609,7 @@ export class PiConductorApp {
         this.appendGlobalLog("  /run stop")
         this.appendGlobalLog("  /run mode [concurrent|nonconcurrent]")
         this.appendGlobalLog("  /status")
-        this.appendGlobalLog("  /diff [open|close|next|prev|hunk <next|prev>|mode [unified|split]|refresh]")
+        this.appendGlobalLog("  /diff [open|close|next|prev|mode [unified|split]|refresh]")
         this.appendGlobalLog("  /ui left|right|toggle")
         this.appendGlobalLog("Plain text sends to selected agent in current mode.")
         this.appendGlobalLog("UI: click [+]/[-] in top bar to collapse sidebars (or ctrl+left / ctrl+right).")
@@ -1141,16 +1141,7 @@ export class PiConductorApp {
         }
 
         if (sub === "hunk") {
-          const dir = (args[1] || "").toLowerCase()
-          if (dir === "next") {
-            this.cycleDiffHunk(1)
-            return
-          }
-          if (dir === "prev") {
-            this.cycleDiffHunk(-1)
-            return
-          }
-          this.appendGlobalLog("Usage: /diff hunk <next|prev>")
+          this.appendGlobalLog("Hunk jumping is not available in stacked view yet.")
           return
         }
 
@@ -1182,7 +1173,7 @@ export class PiConductorApp {
           return
         }
 
-        this.appendGlobalLog("Usage: /diff [open|close|next|prev|hunk <next|prev>|mode [unified|split]|refresh]")
+        this.appendGlobalLog("Usage: /diff [open|close|next|prev|mode [unified|split]|refresh]")
         return
       }
 
@@ -2271,16 +2262,17 @@ export class PiConductorApp {
 
     try {
       const fullDiffText = getDiffForFile(workspace.worktreePath, selectedPath)
-      const selected = selectDiffReviewHunk(fullDiffText, selectedHunk)
+      const parsed = parseFileDiff(fullDiffText)
+      const hunkCount = parsed.hunks.length
 
-      this.diffReviewDiff = selected.diffText
+      this.diffReviewDiff = fullDiffText
       this.diffReviewFiletype = filetypeForPath(selectedPath)
-      this.diffReviewHunkCount = selected.hunkCount
-      this.diffReviewHunkIndex = selected.activeHunkIndex
-      this.selectedDiffHunkByWorkspace.set(workspace.id, selected.activeHunkIndex)
+      this.diffReviewHunkCount = hunkCount
+      this.diffReviewHunkIndex = Math.max(0, Math.min(selectedHunk, Math.max(0, hunkCount - 1)))
+      this.selectedDiffHunkByWorkspace.set(workspace.id, this.diffReviewHunkIndex)
       this.diffReviewTitle =
-        selected.hunkCount > 0
-          ? `${selectedPath} · ${this.diffViewMode} · hunk ${selected.activeHunkIndex + 1}/${selected.hunkCount}`
+        hunkCount > 0
+          ? `${selectedPath} · ${this.diffViewMode} · ${hunkCount} hunk${hunkCount === 1 ? "" : "s"}`
           : `${selectedPath} · ${this.diffViewMode}`
     } catch (error) {
       this.diffReviewTitle = `${selectedPath} · ${this.diffViewMode}`
@@ -2480,7 +2472,6 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
     ? `${composerSpinner || "•"} Thinking${snapshot.thinkingPreview ? ` · ${snapshot.thinkingPreview}` : "…"}`
     : ""
   const centerMarkdown = snapshot.conversationMarkdown
-  const diffHunkLabel = snapshot.diffHunkCount > 0 ? `${snapshot.diffHunkIndex + 1}/${snapshot.diffHunkCount}` : "-"
 
   const statusRows = snapshot.statusText
     .split("\n")
@@ -2684,6 +2675,12 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
       }
     }
 
+    if (snapshot.diffModalVisible && key.name === "escape") {
+      key.preventDefault()
+      app.closeDiffReview()
+      return
+    }
+
     if (snapshot.diffModalVisible && focusTarget !== "input") {
       if (key.name === "m") {
         key.preventDefault()
@@ -2700,18 +2697,6 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
       if (key.name === "p") {
         key.preventDefault()
         app.cycleDiffFile(-1)
-        return
-      }
-
-      if (key.name === "openbracket" || key.name === "[") {
-        key.preventDefault()
-        app.cycleDiffHunk(-1)
-        return
-      }
-
-      if (key.name === "closebracket" || key.name === "]") {
-        key.preventDefault()
-        app.cycleDiffHunk(1)
         return
       }
 
@@ -3519,6 +3504,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
           backgroundColor="#090d15"
           onMouseDown={(event) => {
             event.preventDefault()
+            app.closeDiffReview()
           }}
           style={{
             zIndex: 90,
@@ -3661,32 +3647,8 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                 <text content="[File ▶]" fg="#93c5fd" wrapMode="none" selectable={false} />
               </box>
 
-              <text content=" " fg="#93c5fd" wrapMode="none" selectable={false} />
-
-              <box
-                id="pc-diff-modal-prev-hunk"
-                onMouseDown={(event) => {
-                  event.preventDefault()
-                  app.cycleDiffHunk(-1)
-                }}
-              >
-                <text content="[◀ Hunk]" fg="#93c5fd" wrapMode="none" selectable={false} />
-              </box>
-
-              <text content=" " fg="#93c5fd" wrapMode="none" selectable={false} />
-
-              <box
-                id="pc-diff-modal-next-hunk"
-                onMouseDown={(event) => {
-                  event.preventDefault()
-                  app.cycleDiffHunk(1)
-                }}
-              >
-                <text content="[Hunk ▶]" fg="#93c5fd" wrapMode="none" selectable={false} />
-              </box>
-
               <text
-                content={`  hunk ${diffHunkLabel}`}
+                content={`  ${snapshot.diffHunkCount} hunk${snapshot.diffHunkCount === 1 ? "" : "s"} in file`}
                 fg="#94a3b8"
                 wrapMode="none"
                 selectable={false}
@@ -3696,7 +3658,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                 }}
               />
 
-              <text content="/diff close" fg="#64748b" wrapMode="none" selectable={false} />
+              <text content="Esc or [Close]" fg="#64748b" wrapMode="none" selectable={false} />
             </box>
           </box>
         </box>
