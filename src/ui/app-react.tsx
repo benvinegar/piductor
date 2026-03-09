@@ -2568,6 +2568,10 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
     centerTitle.length > maxTitleWidth ? `${centerTitle.slice(0, Math.max(0, maxTitleWidth - 1))}…` : centerTitle
   const fillerLen = Math.max(1, headerWidth - truncatedTitle.length - headerActions.length - 2)
   const conversationHeaderText = `${truncatedTitle} ${"─".repeat(fillerLen)} ${headerActions}`
+  const lobbyTitle = "PIDUCTOR"
+  const lobbySubtitle = "Select a workspace to continue"
+  const lobbyTitleLine = `${" ".repeat(Math.max(0, Math.floor((centerColumnWidth - lobbyTitle.length) / 2)))}${lobbyTitle}`
+  const lobbySubtitleLine = `${" ".repeat(Math.max(0, Math.floor((centerColumnWidth - lobbySubtitle.length) / 2)))}${lobbySubtitle}`
 
   const hasLoadingToken = snapshot.agentBusy
   useEffect(() => {
@@ -2909,7 +2913,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
 
     if (key.name === "tab") {
       key.preventDefault()
-      const tabTargets: FocusTarget[] = workspaceSelectionMode ? [] : ["input"]
+      const tabTargets: FocusTarget[] = workspaceSelectionMode ? ["workspace"] : ["input"]
 
       if (!snapshot.leftSidebarCollapsed && !workspaceTreeCollapsed) {
         tabTargets.push("workspace")
@@ -2920,7 +2924,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
       }
 
       if (tabTargets.length === 1) {
-        setFocusTarget("input")
+        setFocusTarget(tabTargets[0] ?? "input")
         return
       }
 
@@ -2994,7 +2998,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
         {leftVisible && (
           <box
             id="pc-sidebar"
-            width={workspaceSelectionMode ? "100%" : leftColumnWidth}
+            width={leftColumnWidth}
             backgroundColor="#11151f"
             shouldFill
             style={{
@@ -3003,33 +3007,6 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
               paddingRight: 1,
             }}
           >
-            {workspaceSelectionMode && (
-              <box
-                id="pc-lobby-title"
-                style={{
-                  flexDirection: "column",
-                  marginTop: 1,
-                  marginBottom: 1,
-                  flexShrink: 0,
-                }}
-              >
-                <text content="██████╗ ██╗██████╗ ██╗   ██╗ ██████╗████████╗ ██████╗ ██████╗" fg="#93c5fd" wrapMode="none" />
-                <text content="██╔══██╗██║██╔══██╗██║   ██║██╔════╝╚══██╔══╝██╔═══██╗██╔══██╗" fg="#93c5fd" wrapMode="none" />
-                <text content="██████╔╝██║██║  ██║██║   ██║██║        ██║   ██║   ██║██████╔╝" fg="#bfdbfe" wrapMode="none" />
-                <text content="██╔═══╝ ██║██║  ██║██║   ██║██║        ██║   ██║   ██║██╔══██╗" fg="#bfdbfe" wrapMode="none" />
-                <text content="██║     ██║██████╔╝╚██████╔╝╚██████╗   ██║   ╚██████╔╝██║  ██║" fg="#dbeafe" wrapMode="none" />
-                <text content="╚═╝     ╚═╝╚═════╝  ╚═════╝  ╚═════╝   ╚═╝    ╚═════╝ ╚═╝  ╚═╝" fg="#dbeafe" wrapMode="none" />
-                <text
-                  content="Select a workspace from the list, or create one from a local repo path."
-                  fg="#94a3b8"
-                  wrapMode="word"
-                  style={{
-                    marginTop: 1,
-                  }}
-                />
-              </box>
-            )}
-
             <box
               id="pc-workspace-tree-section"
               style={{
@@ -3251,7 +3228,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
           </box>
         )}
 
-        {!workspaceSelectionMode && leftVisible && (
+        {leftVisible && (
           <box
             id="pc-left-resizer"
             width={1}
@@ -3274,15 +3251,31 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
           />
         )}
 
-        {!workspaceSelectionMode && (
-          <box
-            id="pc-center"
-            shouldFill
-            style={{
-              flexDirection: "column",
-              flexGrow: 2,
-            }}
-          >
+        <box
+          id="pc-center"
+          shouldFill
+          backgroundColor="#100f13"
+          style={{
+            flexDirection: "column",
+            flexGrow: 2,
+            paddingLeft: workspaceSelectionMode ? 2 : 0,
+            paddingRight: workspaceSelectionMode ? 2 : 0,
+          }}
+        >
+          {workspaceSelectionMode ? (
+            <box
+              id="pc-lobby-center"
+              shouldFill
+              style={{
+                flexDirection: "column",
+                justifyContent: "center",
+              }}
+            >
+              <text content={lobbyTitleLine} fg="#dbeafe" wrapMode="none" />
+              <text content={lobbySubtitleLine} fg="#94a3b8" wrapMode="none" style={{ marginTop: 1 }} />
+            </box>
+          ) : (
+            <>
           <box
             id="pc-conversation-box"
             backgroundColor="#100f13"
@@ -3418,8 +3411,9 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
               width="100%"
             />
           </box>
-          </box>
-        )}
+            </>
+          )}
+        </box>
 
         {rightVisible && (
           <box
