@@ -93,6 +93,7 @@ function mapAppState(row: any): AppStateRecord {
   return {
     selectedRepoId: Number.isFinite(selectedRepoId ?? Number.NaN) ? selectedRepoId : null,
     selectedWorkspaceId: Number.isFinite(selectedWorkspaceId ?? Number.NaN) ? selectedWorkspaceId : null,
+    themeKey: row.theme_key ? String(row.theme_key) : null,
     updatedAt: String(row.updated_at),
   }
 }
@@ -175,6 +176,7 @@ export class Store {
         singleton_key INTEGER PRIMARY KEY CHECK(singleton_key = 1),
         selected_repo_id INTEGER,
         selected_workspace_id INTEGER,
+        theme_key TEXT,
         updated_at TEXT NOT NULL
       );
     `)
@@ -189,6 +191,12 @@ export class Store {
     const hasSessionFile = runtimeColumns.some((column) => String(column.name) === "session_file")
     if (!hasSessionFile) {
       this.db.exec(`ALTER TABLE workspace_runtime_state ADD COLUMN session_file TEXT`)
+    }
+
+    const appStateColumns = this.db.query(`PRAGMA table_info(app_state)`).all() as Array<{ name: string }>
+    const hasThemeKey = appStateColumns.some((column) => String(column.name) === "theme_key")
+    if (!hasThemeKey) {
+      this.db.exec(`ALTER TABLE app_state ADD COLUMN theme_key TEXT`)
     }
   }
 
@@ -574,7 +582,7 @@ export class Store {
   getAppState(): AppStateRecord | null {
     const row = this.db
       .query(`
-        SELECT selected_repo_id, selected_workspace_id, updated_at
+        SELECT selected_repo_id, selected_workspace_id, theme_key, updated_at
         FROM app_state
         WHERE singleton_key = 1
       `)
@@ -583,19 +591,24 @@ export class Store {
     return row ? mapAppState(row) : null
   }
 
-  setAppState(params: { selectedRepoId: number | null; selectedWorkspaceId: number | null }): AppStateRecord {
+  setAppState(params: {
+    selectedRepoId: number | null
+    selectedWorkspaceId: number | null
+    themeKey: string | null
+  }): AppStateRecord {
     const now = nowIso()
 
     this.db
       .query(`
-        INSERT INTO app_state(singleton_key, selected_repo_id, selected_workspace_id, updated_at)
-        VALUES(1, ?, ?, ?)
+        INSERT INTO app_state(singleton_key, selected_repo_id, selected_workspace_id, theme_key, updated_at)
+        VALUES(1, ?, ?, ?, ?)
         ON CONFLICT(singleton_key) DO UPDATE SET
           selected_repo_id = excluded.selected_repo_id,
           selected_workspace_id = excluded.selected_workspace_id,
+          theme_key = excluded.theme_key,
           updated_at = excluded.updated_at
       `)
-      .run(params.selectedRepoId, params.selectedWorkspaceId, now)
+      .run(params.selectedRepoId, params.selectedWorkspaceId, params.themeKey, now)
 
     const next = this.getAppState()
     if (!next) {

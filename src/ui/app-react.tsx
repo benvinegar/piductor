@@ -74,6 +74,17 @@ import {
 import { diffFingerprintFromStats } from "../review/diff-fingerprint"
 import { LOADING_TOKEN, renderLoadingTokens } from "./loading"
 import { buildHelpMarkdown, findCommandSuggestions } from "./commands"
+import {
+  DEFAULT_THEME_KEY,
+  getThemeByKey,
+  nextThemeKey,
+  parseThemeArgs,
+  resolveThemeKey,
+  themeUsage,
+  toThemeMarkdown,
+  type ThemeKey,
+  type UiThemeDefinition,
+} from "./themes"
 import { compactThinkingPreview } from "./thinking-preview"
 import { sanitizePiStderrLine, shouldSurfacePiStderr } from "../network/pi-stderr"
 import { parseAgentCommand, resolveRestartModel } from "../agent/control"
@@ -158,16 +169,16 @@ function formatCommandSuggestionLine(command: string, description: string, width
   return truncateWithEllipsis(`${lhs} — ${rhs}`, width)
 }
 
-function workspaceStatusColor(status: string): string {
+function workspaceStatusColor(status: string, theme: UiThemeDefinition): string {
   switch (status) {
     case "active":
-      return "#86efac"
+      return theme.colors.statusActive
     case "busy":
-      return "#93c5fd"
+      return theme.colors.statusBusy
     case "error":
-      return "#fca5a5"
+      return theme.colors.statusError
     default:
-      return "#94a3b8"
+      return theme.colors.statusIdle
   }
 }
 
@@ -195,6 +206,7 @@ export interface AppSnapshot {
   workspaceTreeSelectedIndex: number
   selectedRepoId: number | null
   selectedWorkspaceId: number | null
+  themeKey: ThemeKey
   sendMode: SendMode
   leftSidebarCollapsed: boolean
   rightSidebarCollapsed: boolean
@@ -432,6 +444,7 @@ export class PiConductorApp {
     workspaceTreeSelectedIndex: 0,
     selectedRepoId: null,
     selectedWorkspaceId: null,
+    themeKey: DEFAULT_THEME_KEY,
     sendMode: this.sendModeState.defaultMode,
     leftSidebarCollapsed: false,
     rightSidebarCollapsed: false,
@@ -462,8 +475,10 @@ export class PiConductorApp {
   }
 
   private readonly listeners = new Set<() => void>()
+  private themeKey: ThemeKey = DEFAULT_THEME_KEY
   private lastPersistedRepoId: number | null = null
   private lastPersistedWorkspaceId: number | null = null
+  private lastPersistedThemeKey: ThemeKey = DEFAULT_THEME_KEY
 
   private constructor(renderer: CliRenderer, root: Root, config: AppConfig, store: Store) {
     this.renderer = renderer
@@ -481,7 +496,7 @@ export class PiConductorApp {
       useMouse: true,
     })
 
-    renderer.setBackgroundColor("#0b1220")
+    renderer.setBackgroundColor(getThemeByKey(DEFAULT_THEME_KEY).colors.appBackground)
 
     const root = createRoot(renderer)
     const app = new PiConductorApp(renderer, root, config, store)
@@ -526,6 +541,7 @@ export class PiConductorApp {
       workspaceTreeSelectedIndex: this.workspaceTreeSelectedIndex,
       selectedRepoId: this.selectedRepoId,
       selectedWorkspaceId: this.selectedWorkspaceId,
+      themeKey: this.themeKey,
       sendMode: this.getActiveSendMode(),
       leftSidebarCollapsed: this.leftSidebarCollapsed,
       rightSidebarCollapsed: this.rightSidebarCollapsed,
@@ -555,7 +571,7 @@ export class PiConductorApp {
       footerText: this.footerText,
     }
 
-    this.persistAppSelectionIfChanged()
+    this.persistAppStateIfChanged()
 
     for (const listener of this.listeners) {
       listener()
@@ -580,28 +596,65 @@ export class PiConductorApp {
     this.emitSnapshot()
   }
 
-  private persistAppSelectionIfChanged() {
-    if (this.selectedRepoId === this.lastPersistedRepoId && this.selectedWorkspaceId === this.lastPersistedWorkspaceId) {
+  private applyTheme() {
+    const theme = getThemeByKey(this.themeKey)
+    this.renderer.setBackgroundColor(theme.colors.appBackground)
+  }
+
+  private setTheme(themeKey: ThemeKey, options: { log?: boolean } = {}) {
+    if (this.themeKey === themeKey) {
+      if (options.log) {
+        const current = getThemeByKey(themeKey)
+        this.appendGlobalLog(`Theme unchanged: ${current.name} (${current.key})`)
+      }
+      return
+    }
+
+    this.themeKey = themeKey
+    this.applyTheme()
+
+    if (options.log !== false) {
+      const current = getThemeByKey(themeKey)
+      this.appendGlobalLog(`Theme set to ${current.name} (${current.key})`)
+    }
+  }
+
+  private persistAppStateIfChanged() {
+    if (
+      this.selectedRepoId === this.lastPersistedRepoId &&
+      this.selectedWorkspaceId === this.lastPersistedWorkspaceId &&
+      this.themeKey === this.lastPersistedThemeKey
+    ) {
       return
     }
 
     this.store.setAppState({
       selectedRepoId: this.selectedRepoId,
       selectedWorkspaceId: this.selectedWorkspaceId,
+      themeKey: this.themeKey,
     })
 
     this.lastPersistedRepoId = this.selectedRepoId
     this.lastPersistedWorkspaceId = this.selectedWorkspaceId
+    this.lastPersistedThemeKey = this.themeKey
   }
 
   private restoreSelectionFromAppState() {
     const state = this.store.getAppState()
     if (!state) {
+      this.applyTheme()
       return
     }
 
+    const restoredThemeKey = resolveThemeKey(state.themeKey)
+    if (restoredThemeKey) {
+      this.themeKey = restoredThemeKey
+    }
+    this.applyTheme()
+
     this.lastPersistedRepoId = state.selectedRepoId
     this.lastPersistedWorkspaceId = state.selectedWorkspaceId
+    this.lastPersistedThemeKey = this.themeKey
 
     const preferredWorkspace =
       state.selectedWorkspaceId !== null ? this.store.getWorkspaceById(state.selectedWorkspaceId) : null
@@ -1300,6 +1353,34 @@ export class PiConductorApp {
         }
 
         await this.handlePrMerge(workspace, mergeArgs)
+        return
+      }
+
+      case "theme": {
+        const parsed = parseThemeArgs(args)
+        if (!parsed) {
+          this.appendGlobalLog(themeUsage())
+          return
+        }
+
+        if (parsed.action === "show") {
+          const theme = getThemeByKey(this.themeKey)
+          this.appendGlobalLog(`Theme: ${theme.name} (${theme.key})`)
+          return
+        }
+
+        if (parsed.action === "list") {
+          this.openCommandModal("Themes", toThemeMarkdown(this.themeKey))
+          return
+        }
+
+        if (parsed.action === "next") {
+          const next = nextThemeKey(this.themeKey)
+          this.setTheme(next)
+          return
+        }
+
+        this.setTheme(parsed.themeKey)
         return
       }
 
@@ -3086,7 +3167,7 @@ export class PiConductorApp {
 
     this.statusText = statusLines.join("\n")
     this.conversationTabsText = workspace ? workspace.branch : "No workspace selected"
-    this.footerText = `repos=${this.repos.length} workspaces=${this.workspaces.length} · data=${this.config.dataDir} · pi=${this.config.piCommand}`
+    this.footerText = `repos=${this.repos.length} workspaces=${this.workspaces.length} · theme=${this.themeKey} · data=${this.config.dataDir} · pi=${this.config.piCommand}`
   }
 
   private toConversationBlocks(lines: string[]): ConversationBlock[] {
@@ -3287,36 +3368,38 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
   const [composerText, setComposerText] = useState("")
   const [commandSuggestionIndex, setCommandSuggestionIndex] = useState(0)
   const [loadingFrameIndex, setLoadingFrameIndex] = useState(0)
+  const theme = useMemo(() => getThemeByKey(snapshot.themeKey), [snapshot.themeKey])
+  const colors = theme.colors
 
   const conversationSyntaxStyle = useMemo(
     () =>
       SyntaxStyle.fromStyles({
-        keyword: { fg: parseColor("#93c5fd"), bold: true },
-        string: { fg: parseColor("#a7f3d0") },
-        comment: { fg: parseColor("#9ca3af"), italic: true },
-        number: { fg: parseColor("#fca5a5") },
-        function: { fg: parseColor("#c4b5fd") },
-        type: { fg: parseColor("#f9a8d4") },
-        operator: { fg: parseColor("#fcd34d") },
-        variable: { fg: parseColor("#e5e7eb") },
-        property: { fg: parseColor("#93c5fd") },
-        "markup.heading": { fg: parseColor("#d1d5db"), bold: true },
-        "markup.heading.1": { fg: parseColor("#f9fafb"), bold: true },
-        "markup.heading.2": { fg: parseColor("#e5e7eb"), bold: true },
-        "markup.bold": { fg: parseColor("#f9fafb"), bold: true },
-        "markup.strong": { fg: parseColor("#f9fafb"), bold: true },
-        "markup.italic": { fg: parseColor("#d1d5db"), italic: true },
-        "markup.list": { fg: parseColor("#9ca3af") },
-        "markup.quote": { fg: parseColor("#a1a1aa"), italic: true },
-        "markup.raw": { fg: parseColor("#93c5fd"), bg: parseColor("#111827") },
-        "markup.raw.block": { fg: parseColor("#93c5fd"), bg: parseColor("#111827") },
-        "markup.raw.inline": { fg: parseColor("#93c5fd"), bg: parseColor("#111827") },
-        "markup.link": { fg: parseColor("#60a5fa"), underline: true },
-        "markup.link.label": { fg: parseColor("#93c5fd"), underline: true },
-        "markup.link.url": { fg: parseColor("#60a5fa"), underline: true },
-        default: { fg: parseColor("#e5e7eb") },
+        keyword: { fg: parseColor(colors.accent), bold: true },
+        string: { fg: parseColor(colors.success) },
+        comment: { fg: parseColor(colors.textMuted), italic: true },
+        number: { fg: parseColor(colors.error) },
+        function: { fg: parseColor(colors.accentStrong) },
+        type: { fg: parseColor(colors.warning) },
+        operator: { fg: parseColor(colors.warning) },
+        variable: { fg: parseColor(colors.textPrimary) },
+        property: { fg: parseColor(colors.accentSoft) },
+        "markup.heading": { fg: parseColor(colors.textSecondary), bold: true },
+        "markup.heading.1": { fg: parseColor(colors.textPrimary), bold: true },
+        "markup.heading.2": { fg: parseColor(colors.textSecondary), bold: true },
+        "markup.bold": { fg: parseColor(colors.textPrimary), bold: true },
+        "markup.strong": { fg: parseColor(colors.textPrimary), bold: true },
+        "markup.italic": { fg: parseColor(colors.textSecondary), italic: true },
+        "markup.list": { fg: parseColor(colors.textMuted) },
+        "markup.quote": { fg: parseColor(colors.textMuted), italic: true },
+        "markup.raw": { fg: parseColor(colors.accent), bg: parseColor(colors.markdownCodeBackground) },
+        "markup.raw.block": { fg: parseColor(colors.accent), bg: parseColor(colors.markdownCodeBackground) },
+        "markup.raw.inline": { fg: parseColor(colors.accent), bg: parseColor(colors.markdownCodeBackground) },
+        "markup.link": { fg: parseColor(colors.link), underline: true },
+        "markup.link.label": { fg: parseColor(colors.link), underline: true },
+        "markup.link.url": { fg: parseColor(colors.link), underline: true },
+        default: { fg: parseColor(colors.textPrimary) },
       }),
-    [],
+    [colors],
   )
 
   const workspaceSelectionMode = snapshot.selectedWorkspaceId === null
@@ -3351,7 +3434,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
   const commandModalHeight = clamp(Math.floor(terminalHeight * 0.72), 14, Math.max(14, terminalHeight - 4))
   const diffModalWidth = clamp(Math.floor(terminalWidth * 0.9), 72, Math.max(72, terminalWidth - 4))
   const diffModalHeight = clamp(Math.floor(terminalHeight * 0.85), 16, Math.max(16, terminalHeight - 3))
-  const headerActions = "/help · /mode · /ui"
+  const headerActions = "/help · /mode · /theme · /ui"
   const headerWidth = Math.max(12, centerColumnWidth - 2)
   const minGap = 3
   const maxTitleWidth = Math.max(4, headerWidth - headerActions.length - minGap)
@@ -3875,7 +3958,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
           <box
             id="pc-sidebar"
             width={leftColumnWidth}
-            backgroundColor="#11151f"
+            backgroundColor={colors.sidebarBackground}
             shouldFill
             style={{
               flexDirection: "column",
@@ -3894,7 +3977,9 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
               <box
                 id="pc-workspace-tree-header"
                 height={1}
-                backgroundColor={workspaceTreeCollapsed ? "#1a2332" : "#182031"}
+                backgroundColor={
+                  workspaceTreeCollapsed ? colors.sectionHeaderCollapsedBackground : colors.sectionHeaderBackground
+                }
                 onMouseDown={() => {
                   setWorkspaceTreeCollapsed((prev) => !prev)
                 }}
@@ -3907,7 +3992,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                 <text
                   id="pc-workspace-tree-header-text"
                   content={workspaceTreeHeader}
-                  fg="#bfdbfe"
+                  fg={colors.sectionHeaderText}
                   wrapMode="none"
                   selectable={false}
                 />
@@ -3952,7 +4037,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                       const plusText = meta ? `+${meta.added}` : "+0"
                       const minusText = meta ? `-${meta.removed}` : "-0"
                       const statusText = meta ? formatWorkspaceRuntimeLabel(meta.status, meta.busy) : "stopped"
-                      const statusColor = workspaceStatusColor(statusText)
+                      const statusColor = workspaceStatusColor(statusText, theme)
                       const activityText = meta ? formatWorkspaceActivityAge(meta.activityAt) : "-"
 
                       return (
@@ -3960,7 +4045,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                           key={value}
                           id={`pc-workspace-tree-row-${index}`}
                           height={isRepoRow ? 1 : 2}
-                          backgroundColor={selected ? "#1f2937" : "transparent"}
+                          backgroundColor={selected ? colors.selectedBackground : "transparent"}
                           onMouseDown={(event) => {
                             event.preventDefault()
                             setWorkspaceTreeCollapsed(false)
@@ -3978,7 +4063,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                             <text
                               id={`pc-workspace-tree-row-text-${index}`}
                               content={option.name}
-                              fg={selected ? "#e2e8f0" : "#dbeafe"}
+                              fg={selected ? colors.selectedText : colors.accentStrong}
                               wrapMode="none"
                               style={{
                                 flexGrow: 1,
@@ -3998,7 +4083,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                                 <text
                                   id={`pc-workspace-tree-row-name-${index}`}
                                   content={option.name}
-                                  fg={selected ? "#e2e8f0" : "#cbd5e1"}
+                                  fg={selected ? colors.selectedText : colors.textSecondary}
                                   wrapMode="none"
                                   style={{
                                     flexGrow: 1,
@@ -4008,7 +4093,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                                 <text
                                   id={`pc-workspace-tree-row-activity-${index}`}
                                   content={activityText}
-                                  fg="#94a3b8"
+                                  fg={colors.textMuted}
                                   wrapMode="none"
                                   selectable={false}
                                   style={{
@@ -4040,7 +4125,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                                 <text
                                   id={`pc-workspace-tree-row-plus-${index}`}
                                   content={plusText}
-                                  fg="#86efac"
+                                  fg={colors.success}
                                   wrapMode="none"
                                   selectable={false}
                                   style={{
@@ -4051,7 +4136,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                                 <text
                                   id={`pc-workspace-tree-row-minus-${index}`}
                                   content={minusText}
-                                  fg="#fca5a5"
+                                  fg={colors.error}
                                   wrapMode="none"
                                   selectable={false}
                                   style={{
@@ -4089,15 +4174,15 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                     marginBottom: 1,
                   }}
                 >
-                  <text content="[+ Create workspace]" fg="#86efac" wrapMode="none" selectable={false} />
+                  <text content="[+ Create workspace]" fg={colors.success} wrapMode="none" selectable={false} />
                 </box>
               )}
 
-              <text id="pc-workspace-version" content={`Piductor ${APP_VERSION}`} fg="#94a3b8" wrapMode="none" />
+              <text id="pc-workspace-version" content={`Piductor ${APP_VERSION}`} fg={colors.textMuted} wrapMode="none" />
               <text
                 id="pc-workspace-archive-tip"
                 content="/workspace archived · /workspace restore <id|name>"
-                fg="#64748b"
+                fg={colors.textSubtle}
                 wrapMode="none"
               />
             </box>
@@ -4109,7 +4194,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
             id="pc-left-resizer"
             width={1}
             shouldFill
-            backgroundColor={leftResizerActive ? "#60a5fa" : "#273142"}
+            backgroundColor={leftResizerActive ? colors.accentSoft : colors.commandPaletteBorder}
             onMouseDown={(event) => {
               event.preventDefault()
               startResize("left", event.x)
@@ -4131,7 +4216,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
           id="pc-center"
           key={workspaceSelectionMode ? "pc-center-lobby" : "pc-center-active"}
           shouldFill
-          backgroundColor="#100f13"
+          backgroundColor={colors.centerBackground}
           style={{
             flexDirection: "column",
             flexGrow: 2,
@@ -4168,11 +4253,11 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                   <text
                     key={`pc-lobby-ascii-${index}`}
                     content={line}
-                    fg={index < 2 ? "#93c5fd" : "#dbeafe"}
+                    fg={index < 2 ? colors.accent : colors.accentStrong}
                     wrapMode="none"
                   />
                 ))}
-                <text content={lobbySubtitle} fg="#94a3b8" wrapMode="none" style={{ marginTop: 1 }} />
+                <text content={lobbySubtitle} fg={colors.textMuted} wrapMode="none" style={{ marginTop: 1 }} />
               </box>
             </box>
           ) : (
@@ -4186,7 +4271,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
             >
           <box
             id="pc-conversation-box"
-            backgroundColor="#100f13"
+            backgroundColor={colors.centerBackground}
             shouldFill
             style={{
               flexDirection: "column",
@@ -4199,7 +4284,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
             <box
               id="pc-conversation-header"
               height={1}
-              backgroundColor="#182031"
+              backgroundColor={colors.sectionHeaderBackground}
               style={{
                 flexShrink: 0,
                 flexDirection: "row",
@@ -4210,7 +4295,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
               <text
                 id="pc-conversation-tabs"
                 content={conversationHeaderText}
-                fg="#bfdbfe"
+                fg={colors.sectionHeaderText}
                 wrapMode="none"
                 selectable={false}
               />
@@ -4257,7 +4342,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                       <box
                         key={`pc-conversation-user-${index}`}
                         width="100%"
-                        backgroundColor="#1e293b"
+                        backgroundColor={colors.userRowBackground}
                         style={{
                           flexDirection: "column",
                           flexShrink: 0,
@@ -4268,7 +4353,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                           paddingRight: 1,
                         }}
                       >
-                        <text content={block.text} fg="#e2e8f0" wrapMode="word" width="100%" />
+                        <text content={block.text} fg={colors.userRowText} wrapMode="word" width="100%" />
                       </box>
                     )
                   }
@@ -4284,7 +4369,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                           marginBottom: isLast ? 0 : 1,
                         }}
                       >
-                        <text content={block.text} fg="#64748b" wrapMode="word" width="100%" />
+                        <text content={block.text} fg={colors.activityText} wrapMode="word" width="100%" />
                       </box>
                     )
                   }
@@ -4309,7 +4394,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                 <text
                   id="pc-thinking-indicator"
                   content={thinkingIndicatorText}
-                  fg="#93c5fd"
+                  fg={colors.accent}
                   wrapMode="word"
                   style={{
                     marginTop: 1,
@@ -4323,7 +4408,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
           <box
             id="pc-input-box"
             height={6 + commandSuggestionHeight}
-            backgroundColor="#151922"
+            backgroundColor={colors.inputBackground}
             shouldFill
             onMouseDown={() => {
               setFocusTarget("input")
@@ -4340,9 +4425,9 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                 id="pc-command-autocomplete"
                 width="100%"
                 height={commandSuggestionHeight}
-                backgroundColor="#0b1220"
+                backgroundColor={colors.commandPaletteBackground}
                 border
-                borderColor="#334155"
+                borderColor={colors.commandPaletteBorder}
                 style={{
                   flexDirection: "column",
                   flexShrink: 0,
@@ -4359,7 +4444,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                       key={`pc-cmd-suggestion-${entry.command}`}
                       width="100%"
                       height={1}
-                      backgroundColor={selected ? "#1e293b" : "transparent"}
+                      backgroundColor={selected ? colors.selectedBackground : "transparent"}
                       onMouseDown={(event) => {
                         event.preventDefault()
                         applyCommandSuggestion(entry.command)
@@ -4370,7 +4455,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                         flexShrink: 0,
                       }}
                     >
-                      <text content={line} fg={selected ? "#e2e8f0" : "#93c5fd"} wrapMode="none" />
+                      <text content={line} fg={selected ? colors.selectedText : colors.accent} wrapMode="none" />
                     </box>
                   )
                 })}
@@ -4379,8 +4464,8 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
 
             <text
               id="pc-compose-hint"
-              content={`${hasLoadingToken ? `${composerSpinner} ` : ""}Composer · /help · /mode prompt|steer|follow_up`}
-              fg={hasLoadingToken ? "#93c5fd" : "#9ca3af"}
+              content={`${hasLoadingToken ? `${composerSpinner} ` : ""}Composer · /help · /mode · /theme`}
+              fg={hasLoadingToken ? colors.accent : colors.textMuted}
               style={{
                 flexShrink: 0,
               }}
@@ -4408,12 +4493,12 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                 { name: "linefeed", shift: true, action: "newline" },
                 { name: "j", ctrl: true, action: "newline" },
               ]}
-              textColor="#f9fafb"
-              focusedTextColor="#ffffff"
-              placeholderColor="#6b7280"
+              textColor={colors.inputText}
+              focusedTextColor={colors.inputText}
+              placeholderColor={colors.inputPlaceholder}
               backgroundColor="transparent"
               focusedBackgroundColor="transparent"
-              cursorColor="#f9fafb"
+              cursorColor={colors.inputCursor}
               wrapMode="word"
               height={3}
               width="100%"
@@ -4428,7 +4513,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
             id="pc-right-resizer"
             width={1}
             shouldFill
-            backgroundColor={rightResizerActive ? "#60a5fa" : "#273142"}
+            backgroundColor={rightResizerActive ? colors.accentSoft : colors.commandPaletteBorder}
             onMouseDown={(event) => {
               event.preventDefault()
               startResize("right", event.x)
@@ -4450,7 +4535,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
           <box
             id="pc-right"
             width={rightColumnWidth}
-            backgroundColor="#111013"
+            backgroundColor={colors.rightBackground}
             shouldFill
             style={{
               flexDirection: "column",
@@ -4469,7 +4554,9 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
               <box
                 id="pc-status-header"
                 height={1}
-                backgroundColor={statusSectionCollapsed ? "#1a2332" : "#182031"}
+                backgroundColor={
+                  statusSectionCollapsed ? colors.sectionHeaderCollapsedBackground : colors.sectionHeaderBackground
+                }
                 onMouseDown={() => {
                   setStatusSectionCollapsed((prev) => !prev)
                 }}
@@ -4482,7 +4569,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                 <text
                   id="pc-status-header-text"
                   content={statusSectionHeader}
-                  fg="#bfdbfe"
+                  fg={colors.sectionHeaderText}
                   wrapMode="none"
                   selectable={false}
                 />
@@ -4510,7 +4597,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                       <text
                         id={`pc-status-label-${index}`}
                         content={row.label ? `${row.label.padEnd(10)} ` : ""}
-                        fg="#93c5fd"
+                        fg={colors.accent}
                         wrapMode="none"
                         selectable={false}
                         style={{
@@ -4520,7 +4607,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                       <text
                         id={`pc-status-value-${index}`}
                         content={row.value}
-                        fg="#d1d5db"
+                        fg={colors.textSecondary}
                         wrapMode="none"
                         style={{
                           flexGrow: 1,
@@ -4546,7 +4633,9 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
               <box
                 id="pc-diff-header"
                 height={1}
-                backgroundColor={changesSectionCollapsed ? "#1a2332" : "#182031"}
+                backgroundColor={
+                  changesSectionCollapsed ? colors.sectionHeaderCollapsedBackground : colors.sectionHeaderBackground
+                }
                 onMouseDown={() => {
                   setChangesSectionCollapsed((prev) => !prev)
                 }}
@@ -4559,7 +4648,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                 <text
                   id="pc-diff-header-text"
                   content={changesSectionHeader}
-                  fg="#bfdbfe"
+                  fg={colors.sectionHeaderText}
                   wrapMode="none"
                   selectable={false}
                 />
@@ -4578,7 +4667,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                     <text
                       id="pc-diff-text"
                       content={snapshot.diffText}
-                      fg="#d1d5db"
+                      fg={colors.textSecondary}
                       wrapMode="none"
                       style={{
                         flexGrow: 1,
@@ -4614,7 +4703,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                           key={`${row.path}-${index}`}
                           id={`pc-diff-row-${index}`}
                           height={1}
-                          backgroundColor={selected ? "#1f2937" : "transparent"}
+                          backgroundColor={selected ? colors.selectedBackground : "transparent"}
                           onMouseDown={(event) => {
                             event.preventDefault()
                             setChangesSectionCollapsed(false)
@@ -4630,7 +4719,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                           <text
                             id={`pc-diff-plus-${index}`}
                             content={row.plus}
-                            fg="#86efac"
+                            fg={colors.success}
                             wrapMode="none"
                             selectable={false}
                             style={{
@@ -4641,7 +4730,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                           <text
                             id={`pc-diff-minus-${index}`}
                             content={row.minus}
-                            fg="#fca5a5"
+                            fg={colors.error}
                             wrapMode="none"
                             selectable={false}
                             style={{
@@ -4652,7 +4741,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                           <text
                             id={`pc-diff-path-${index}`}
                             content={row.path}
-                            fg={selected ? "#e2e8f0" : "#d1d5db"}
+                            fg={selected ? colors.selectedText : colors.textSecondary}
                             wrapMode="none"
                             style={{
                               flexGrow: 1,
@@ -4667,7 +4756,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                         <text
                           id="pc-diff-extra"
                           content={snapshot.diffText}
-                          fg="#94a3b8"
+                          fg={colors.textMuted}
                           wrapMode="none"
                           style={{
                             marginTop: 1,
@@ -4692,7 +4781,9 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
               <box
                 id="pc-terminal-header"
                 height={1}
-                backgroundColor={terminalSectionCollapsed ? "#1a2332" : "#182031"}
+                backgroundColor={
+                  terminalSectionCollapsed ? colors.sectionHeaderCollapsedBackground : colors.sectionHeaderBackground
+                }
                 onMouseDown={() => {
                   setTerminalSectionCollapsed((prev) => !prev)
                 }}
@@ -4705,7 +4796,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                 <text
                   id="pc-terminal-header-text"
                   content={terminalSectionHeader}
-                  fg="#bfdbfe"
+                  fg={colors.sectionHeaderText}
                   wrapMode="none"
                   selectable={false}
                 />
@@ -4715,7 +4806,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                 <text
                   id="pc-terminal-text"
                   content={snapshot.terminalText}
-                  fg="#a7f3d0"
+                  fg={colors.success}
                   wrapMode="none"
                   style={{
                     flexGrow: 1,
@@ -4736,7 +4827,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
           top={0}
           width="100%"
           height="100%"
-          backgroundColor="#090d15"
+          backgroundColor={colors.modalOverlayBackground}
           onMouseDown={(event) => {
             event.preventDefault()
             setCreateWorkspaceModalVisible(false)
@@ -4756,8 +4847,8 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
             marginTop={-5}
             border
             borderStyle="double"
-            borderColor="#60a5fa"
-            backgroundColor="#0f172a"
+            borderColor={colors.modalBorder}
+            backgroundColor={colors.modalBackground}
             title="Create workspace"
             titleAlignment="center"
             onMouseDown={(event) => {
@@ -4771,7 +4862,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
               paddingBottom: 1,
             }}
           >
-            <text content="Local repo path" fg="#bfdbfe" wrapMode="none" selectable={false} />
+            <text content="Local repo path" fg={colors.sectionHeaderText} wrapMode="none" selectable={false} />
             <textarea
               id="pc-create-workspace-path"
               ref={createPathRef}
@@ -4784,12 +4875,12 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                 { name: "return", action: "submit" },
                 { name: "linefeed", action: "submit" },
               ]}
-              textColor="#f9fafb"
-              focusedTextColor="#ffffff"
-              placeholderColor="#6b7280"
-              backgroundColor="#111827"
-              focusedBackgroundColor="#0b1220"
-              cursorColor="#f9fafb"
+              textColor={colors.inputText}
+              focusedTextColor={colors.inputText}
+              placeholderColor={colors.inputPlaceholder}
+              backgroundColor={colors.markdownCodeBackground}
+              focusedBackgroundColor={colors.commandPaletteBackground}
+              cursorColor={colors.inputCursor}
               wrapMode="none"
               height={3}
               width="100%"
@@ -4815,10 +4906,10 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                   void submitCreateWorkspaceFromModal()
                 }}
               >
-                <text content="[OK]" fg="#86efac" wrapMode="none" selectable={false} />
+                <text content="[OK]" fg={colors.success} wrapMode="none" selectable={false} />
               </box>
 
-              <text content=" " fg="#94a3b8" wrapMode="none" selectable={false} />
+              <text content=" " fg={colors.textMuted} wrapMode="none" selectable={false} />
 
               <box
                 id="pc-create-workspace-modal-cancel"
@@ -4827,12 +4918,12 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                   setCreateWorkspaceModalVisible(false)
                 }}
               >
-                <text content="[Cancel]" fg="#fca5a5" wrapMode="none" selectable={false} />
+                <text content="[Cancel]" fg={colors.error} wrapMode="none" selectable={false} />
               </box>
 
               <text
                 content="  Enter local repo path · Esc to cancel"
-                fg="#64748b"
+                fg={colors.textSubtle}
                 wrapMode="none"
                 selectable={false}
               />
@@ -4849,7 +4940,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
           top={0}
           width="100%"
           height="100%"
-          backgroundColor="#090d15"
+          backgroundColor={colors.modalOverlayBackground}
           onMouseDown={(event) => {
             event.preventDefault()
             app.closeCommandModal()
@@ -4869,8 +4960,8 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
             marginTop={-Math.floor(commandModalHeight / 2)}
             border
             borderStyle="double"
-            borderColor="#60a5fa"
-            backgroundColor="#0f172a"
+            borderColor={colors.modalBorder}
+            backgroundColor={colors.modalBackground}
             title={`${snapshot.commandModalTitle} · Commands`}
             titleAlignment="center"
             onMouseDown={(event) => {
@@ -4895,7 +4986,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
             >
               <text
                 content="Search and run commands from the composer with `/...`"
-                fg="#94a3b8"
+                fg={colors.textMuted}
                 wrapMode="none"
                 style={{
                   flexGrow: 1,
@@ -4910,7 +5001,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                   app.closeCommandModal()
                 }}
               >
-                <text content="[Close]" fg="#fca5a5" wrapMode="none" selectable={false} />
+                <text content="[Close]" fg={colors.error} wrapMode="none" selectable={false} />
               </box>
             </box>
 
@@ -4930,7 +5021,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
 
             <text
               content="Esc or [Close]"
-              fg="#64748b"
+              fg={colors.textSubtle}
               wrapMode="none"
               selectable={false}
               style={{
@@ -4950,7 +5041,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
           top={0}
           width="100%"
           height="100%"
-          backgroundColor="#090d15"
+          backgroundColor={colors.modalOverlayBackground}
           onMouseDown={(event) => {
             event.preventDefault()
             app.closeDiffReview()
@@ -4970,8 +5061,8 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
             marginTop={-Math.floor(diffModalHeight / 2)}
             border
             borderStyle="double"
-            borderColor="#60a5fa"
-            backgroundColor="#0f172a"
+            borderColor={colors.modalBorder}
+            backgroundColor={colors.modalBackground}
             title={`Review branch changes · ${snapshot.diffViewMode}`}
             titleAlignment="center"
             onMouseDown={(event) => {
@@ -4997,7 +5088,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
               <text
                 id="pc-diff-modal-title"
                 content={snapshot.diffReviewTitle}
-                fg="#dbeafe"
+                fg={colors.accentStrong}
                 wrapMode="none"
                 style={{
                   flexGrow: 1,
@@ -5012,10 +5103,15 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                   app.toggleDiffViewMode()
                 }}
               >
-                <text content={`[Mode: ${snapshot.diffViewMode}]`} fg="#93c5fd" wrapMode="none" selectable={false} />
+                <text
+                  content={`[Mode: ${snapshot.diffViewMode}]`}
+                  fg={colors.accent}
+                  wrapMode="none"
+                  selectable={false}
+                />
               </box>
 
-              <text content=" " fg="#93c5fd" wrapMode="none" selectable={false} />
+              <text content=" " fg={colors.accent} wrapMode="none" selectable={false} />
 
               <box
                 id="pc-diff-modal-close-btn"
@@ -5024,7 +5120,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                   app.closeDiffReview()
                 }}
               >
-                <text content="[Close]" fg="#fca5a5" wrapMode="none" selectable={false} />
+                <text content="[Close]" fg={colors.error} wrapMode="none" selectable={false} />
               </box>
             </box>
 
@@ -5036,15 +5132,15 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                 filetype={snapshot.diffReviewFiletype}
                 showLineNumbers
                 wrapMode="none"
-                lineNumberFg="#64748b"
-                lineNumberBg="#0b1220"
-                addedBg="#123320"
-                removedBg="#3d1823"
-                contextBg="#0b1220"
-                addedSignColor="#86efac"
-                removedSignColor="#fca5a5"
-                addedLineNumberBg="#123320"
-                removedLineNumberBg="#3d1823"
+                lineNumberFg={colors.diffLineNumberFg}
+                lineNumberBg={colors.diffLineNumberBg}
+                addedBg={colors.diffAddedBg}
+                removedBg={colors.diffRemovedBg}
+                contextBg={colors.diffContextBg}
+                addedSignColor={colors.diffAddedSign}
+                removedSignColor={colors.diffRemovedSign}
+                addedLineNumberBg={colors.diffAddedLineNumberBg}
+                removedLineNumberBg={colors.diffRemovedLineNumberBg}
                 style={{
                   flexGrow: 1,
                   flexShrink: 1,
@@ -5056,7 +5152,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
               <text
                 id="pc-diff-modal-empty"
                 content="No changed files to review."
-                fg="#cbd5e1"
+                fg={colors.textSecondary}
                 wrapMode="word"
                 style={{
                   flexGrow: 1,
@@ -5081,10 +5177,10 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                   app.cycleDiffFile(-1)
                 }}
               >
-                <text content="[◀ File]" fg="#93c5fd" wrapMode="none" selectable={false} />
+                <text content="[◀ File]" fg={colors.accent} wrapMode="none" selectable={false} />
               </box>
 
-              <text content=" " fg="#93c5fd" wrapMode="none" selectable={false} />
+              <text content=" " fg={colors.accent} wrapMode="none" selectable={false} />
 
               <box
                 id="pc-diff-modal-next-file"
@@ -5093,12 +5189,12 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                   app.cycleDiffFile(1)
                 }}
               >
-                <text content="[File ▶]" fg="#93c5fd" wrapMode="none" selectable={false} />
+                <text content="[File ▶]" fg={colors.accent} wrapMode="none" selectable={false} />
               </box>
 
               <text
                 content={`  ${snapshot.diffHunkCount} hunk${snapshot.diffHunkCount === 1 ? "" : "s"} in file`}
-                fg="#94a3b8"
+                fg={colors.textMuted}
                 wrapMode="none"
                 selectable={false}
                 style={{
@@ -5107,7 +5203,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                 }}
               />
 
-              <text content="Esc or [Close]" fg="#64748b" wrapMode="none" selectable={false} />
+              <text content="Esc or [Close]" fg={colors.textSubtle} wrapMode="none" selectable={false} />
             </box>
           </box>
         </box>

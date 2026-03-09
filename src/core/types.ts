@@ -60,6 +60,7 @@ export interface WorkspaceRuntimeStateRecord {
 export interface AppStateRecord {
   selectedRepoId: number | null
   selectedWorkspaceId: number | null
+  themeKey: string | null
   updatedAt: string
 }
 

@@ -21,6 +21,7 @@ Built with:
 - Archive and restore workspaces
 - Show per-file change stats (`+/-`) in a review panel
 - Collapse sidebars, resize side columns with mouse drag, and collapse sidebar sections
+- Switch between 5 built-in UI themes (`/theme`) with persistence across restarts
 - Navigate a unified workspace tree grouped by repo (`repo -> workspaces`) with expandable repo rows
 
 ## Install
@@ -58,6 +59,7 @@ bun run dev
 /agent start [model]
 /agent stop
 /mode <prompt|steer|follow_up>
+/theme [show|list|next|set <theme>|<theme>]
 /pr create [--dry-run]
 /pr status
 /pr checks
@@ -84,6 +86,8 @@ Plain text input sends a message to the selected workspace agent using the curre
 `/help` opens a modal command reference.
 
 Type `/` in the composer to open command autocomplete (mouse-select or `Tab` to apply a suggestion).
+
+Use `/theme list` to view available themes and `/theme set <theme>` (or `/theme next`) to switch themes at runtime. Theme selection persists across restarts.
 
 `/pr create` requires GitHub CLI auth (`gh auth login`) and is blocked if required merge checklist items are incomplete. Use `/pr status`, `/pr checks`, and `/pr merge` for full PR lifecycle in-app.
 
