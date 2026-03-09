@@ -4407,6 +4407,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                     flexDirection: "column",
                     flexShrink: 0,
                     paddingLeft: 1,
+                    paddingRight: 1,
                   }}
                 >
                   <markdown
@@ -4414,7 +4415,6 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                     content={centerMarkdown}
                     syntaxStyle={conversationSyntaxStyle}
                     conceal
-                    width="100%"
                   />
                 </box>
               ) : (
@@ -4437,7 +4437,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                           paddingRight: 1,
                         }}
                       >
-                        <text content={block.text} fg={colors.userRowText} wrapMode="word" width="100%" />
+                        <text content={block.text} fg={colors.userRowText} wrapMode="word" />
                       </box>
                     )
                   }
@@ -4452,9 +4452,10 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                           flexShrink: 0,
                           marginBottom: isLast ? 0 : 1,
                           paddingLeft: 1,
+                          paddingRight: 1,
                         }}
                       >
-                        <text content={block.text} fg={colors.activityText} wrapMode="word" width="100%" />
+                        <text content={block.text} fg={colors.activityText} wrapMode="word" />
                       </box>
                     )
                   }
@@ -4468,9 +4469,10 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                         flexShrink: 0,
                         marginBottom: isLast ? 0 : 1,
                         paddingLeft: 1,
+                        paddingRight: 1,
                       }}
                     >
-                      <markdown content={block.markdown} syntaxStyle={conversationSyntaxStyle} conceal width="100%" />
+                      <markdown content={block.markdown} syntaxStyle={conversationSyntaxStyle} conceal />
                     </box>
                   )
                 })
@@ -4601,7 +4603,6 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                 cursorColor={colors.inputCursor}
                 wrapMode="word"
                 height={3}
-                width="100%"
               />
             </box>
           </box>
