@@ -40,7 +40,7 @@ import {
   TREE_REPO_PREFIX,
   workspaceTreeValue,
 } from "../workspace/tree"
-import { parseWorkspaceNewArgs, workspaceNewUsage } from "../workspace/new"
+import { parseWorkspaceNewArgs, suggestWorkspaceNameFromBranch, workspaceNewUsage } from "../workspace/new"
 import { extractFirstUrl, parsePrCreateArgs, prCreateUsage } from "../vcs/pr-command"
 import { buildWorkspaceScriptEnv } from "../run/script-env"
 import { shouldStopExistingRun, stopSignalSequence } from "../run/policy"
@@ -561,6 +561,86 @@ export class PiConductorApp {
     this.refreshLogsPanel()
     this.refreshTerminalPanel()
     this.emitSnapshot()
+  }
+
+  private nextWorkspaceName(repoId: number, baseName: string): string {
+    const trimmed = baseName.trim()
+    const stem = trimmed.length > 0 ? trimmed : "workspace"
+    const existing = new Set(this.store.listWorkspaces(repoId, true).map((workspace) => workspace.name))
+
+    if (!existing.has(stem)) {
+      return stem
+    }
+
+    for (let index = 2; index <= 999; index += 1) {
+      const candidate = `${stem}-${index}`
+      if (!existing.has(candidate)) {
+        return candidate
+      }
+    }
+
+    return `${stem}-${Date.now().toString(36).slice(-4)}`
+  }
+
+  public async createWorkspaceFromPath(inputPath: string): Promise<boolean> {
+    const raw = inputPath.trim()
+    if (!raw) {
+      this.appendGlobalLog("Path is required.")
+      this.refreshAllAndEmit()
+      return false
+    }
+
+    const expanded = expandUserPath(raw)
+    const resolved = path.resolve(process.cwd(), expanded)
+
+    let repoRoot = ""
+    let repoName = ""
+    try {
+      const ensured = ensureRepoFromLocalPath(resolved)
+      repoRoot = ensured.repoRoot
+      repoName = ensured.repoName
+    } catch (error) {
+      this.appendGlobalLog(`Invalid repo path: ${resolved}`)
+      this.appendGlobalLog(`ERROR: ${safeErr(error)}`)
+      this.refreshAllAndEmit()
+      return false
+    }
+
+    try {
+      const repo = this.store.upsertRepo(repoName, repoRoot)
+      this.selectedRepoId = repo.id
+      this.expandedRepoIds.add(repo.id)
+      this.reloadRepos(repo.id)
+
+      const baseRef = getDefaultBranchName(repo.rootPath)
+      const workspaceName = this.nextWorkspaceName(repo.id, suggestWorkspaceNameFromBranch(baseRef))
+      const created = createWorktree({
+        repoRoot: repo.rootPath,
+        workspacesDir: this.config.workspacesDir,
+        workspaceName,
+        baseRef,
+      })
+
+      const workspace = this.store.createWorkspace(repo.id, workspaceName, created.branch, created.worktreePath)
+      this.selectedWorkspaceId = workspace.id
+      this.reloadWorkspaces(workspace.id)
+      this.appendWorkspaceLog(
+        workspace.id,
+        `Workspace created at ${workspace.worktreePath} on branch ${workspace.branch} (base ${baseRef})`,
+      )
+
+      if (this.config.scripts.setup) {
+        void this.runConfiguredScript(workspace.id, "setup")
+      }
+
+      this.refreshAllAndEmit()
+      return true
+    } catch (error) {
+      this.appendGlobalLog(`Failed to create workspace from path: ${resolved}`)
+      this.appendGlobalLog(`ERROR: ${safeErr(error)}`)
+      this.refreshAllAndEmit()
+      return false
+    }
   }
 
   public async submitInput(input: string) {
@@ -1892,9 +1972,9 @@ export class PiConductorApp {
       return
     }
 
-    const keep = preferredWorkspaceId ?? this.selectedWorkspaceId
+    const keep = preferredWorkspaceId === undefined ? this.selectedWorkspaceId : preferredWorkspaceId
     const selected = keep ? this.workspaces.find((workspace) => workspace.id === keep) : null
-    this.selectedWorkspaceId = selected ? selected.id : this.workspaces[0].id
+    this.selectedWorkspaceId = selected ? selected.id : null
 
     this.workspaceOptions = this.workspaces.map((workspace) => {
       const agentState = this.store.getAgent(workspace.id)
@@ -1913,10 +1993,8 @@ export class PiConductorApp {
       }
     })
 
-    this.workspaceSelectedIndex = Math.max(
-      0,
-      this.workspaceOptions.findIndex((option) => Number(option.value) === this.selectedWorkspaceId),
-    )
+    const selectedIndex = this.workspaceOptions.findIndex((option) => Number(option.value) === this.selectedWorkspaceId)
+    this.workspaceSelectedIndex = selectedIndex >= 0 ? selectedIndex : 0
 
     this.rebuildWorkspaceTreeOptions()
   }
@@ -2413,9 +2491,11 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
   const snapshot = useSyncExternalStore(app.subscribe, app.getSnapshot, app.getSnapshot)
   const { width: terminalWidth, height: terminalHeight } = useTerminalDimensions()
   const composerRef = useRef<TextareaRenderable | null>(null)
+  const createPathRef = useRef<TextareaRenderable | null>(null)
   const previousWorkspaceIdRef = useRef<number | null>(null)
+  const previousWorkspaceSelectionModeRef = useRef<boolean | null>(null)
   const draftStateRef = useRef<DraftState>({ globalDraft: "", byWorkspace: new Map<number, string>() })
-  const [focusTarget, setFocusTarget] = useState<FocusTarget>("input")
+  const [focusTarget, setFocusTarget] = useState<FocusTarget>("workspace")
   const [leftColumnWidth, setLeftColumnWidth] = useState(36)
   const [rightColumnWidth, setRightColumnWidth] = useState(52)
   const [resizeState, setResizeState] = useState<ResizeState | null>(null)
@@ -2423,6 +2503,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
   const [statusSectionCollapsed, setStatusSectionCollapsed] = useState(false)
   const [changesSectionCollapsed, setChangesSectionCollapsed] = useState(false)
   const [terminalSectionCollapsed, setTerminalSectionCollapsed] = useState(false)
+  const [createWorkspaceModalVisible, setCreateWorkspaceModalVisible] = useState(false)
   const [loadingFrameIndex, setLoadingFrameIndex] = useState(0)
 
   const conversationSyntaxStyle = useMemo(
@@ -2456,8 +2537,9 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
     [],
   )
 
-  const leftVisible = !snapshot.leftSidebarCollapsed
-  const rightVisible = !snapshot.rightSidebarCollapsed
+  const workspaceSelectionMode = snapshot.selectedWorkspaceId === null
+  const leftVisible = workspaceSelectionMode ? true : !snapshot.leftSidebarCollapsed
+  const rightVisible = workspaceSelectionMode ? false : !snapshot.rightSidebarCollapsed
 
   const leftSectionHeaderWidth = Math.max(12, leftColumnWidth - 2)
   const workspaceTreeHeader = formatSectionHeader("Workspaces", workspaceTreeCollapsed, leftSectionHeaderWidth)
@@ -2560,22 +2642,44 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
   }, [snapshot.selectedWorkspaceId])
 
   useEffect(() => {
+    if (workspaceSelectionMode) {
+      return
+    }
+
     if (snapshot.leftSidebarCollapsed && (focusTarget === "repo" || focusTarget === "workspace")) {
       setFocusTarget("input")
     }
-  }, [snapshot.leftSidebarCollapsed, focusTarget])
+  }, [workspaceSelectionMode, snapshot.leftSidebarCollapsed, focusTarget])
 
   useEffect(() => {
+    if (workspaceSelectionMode) {
+      return
+    }
+
     if (workspaceTreeCollapsed && (focusTarget === "repo" || focusTarget === "workspace")) {
       setFocusTarget("input")
     }
-  }, [workspaceTreeCollapsed, focusTarget])
+  }, [workspaceSelectionMode, workspaceTreeCollapsed, focusTarget])
 
   useEffect(() => {
+    const previousSelectionMode = previousWorkspaceSelectionModeRef.current
+    previousWorkspaceSelectionModeRef.current = workspaceSelectionMode
+
+    if (workspaceSelectionMode && previousSelectionMode === false) {
+      setFocusTarget("workspace")
+      return
+    }
+
     if (snapshot.rightSidebarCollapsed && focusTarget === "changes") {
       setFocusTarget("input")
     }
-  }, [snapshot.rightSidebarCollapsed, focusTarget])
+  }, [workspaceSelectionMode, snapshot.rightSidebarCollapsed, focusTarget])
+
+  useEffect(() => {
+    if (workspaceSelectionMode) {
+      setWorkspaceTreeCollapsed(false)
+    }
+  }, [workspaceSelectionMode])
 
   useEffect(() => {
     if (changesSectionCollapsed && focusTarget === "changes") {
@@ -2636,7 +2740,51 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
   const leftResizerActive = resizeState?.edge === "left"
   const rightResizerActive = resizeState?.edge === "right"
 
+  useEffect(() => {
+    if (!createWorkspaceModalVisible) {
+      return
+    }
+
+    const input = createPathRef.current
+    if (!input) {
+      return
+    }
+
+    const existing = input.plainText?.trim() ?? ""
+    if (existing.length === 0) {
+      input.setText(process.cwd())
+    }
+  }, [createWorkspaceModalVisible])
+
+  useEffect(() => {
+    if (!workspaceSelectionMode && createWorkspaceModalVisible) {
+      setCreateWorkspaceModalVisible(false)
+    }
+  }, [workspaceSelectionMode, createWorkspaceModalVisible])
+
+  const submitCreateWorkspaceFromModal = async () => {
+    const targetPath = createPathRef.current?.plainText ?? ""
+    const created = await app.createWorkspaceFromPath(targetPath)
+    if (!created) {
+      return
+    }
+
+    setCreateWorkspaceModalVisible(false)
+    createPathRef.current?.clear()
+    setFocusTarget("input")
+  }
+
   useKeyboard((key: KeyEvent) => {
+    if (createWorkspaceModalVisible && key.name === "escape") {
+      key.preventDefault()
+      setCreateWorkspaceModalVisible(false)
+      return
+    }
+
+    if (createWorkspaceModalVisible) {
+      return
+    }
+
     if (key.ctrl && (key.name === "1" || key.name === "2")) {
       key.preventDefault()
       if (snapshot.leftSidebarCollapsed) {
@@ -2761,7 +2909,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
 
     if (key.name === "tab") {
       key.preventDefault()
-      const tabTargets: FocusTarget[] = ["input"]
+      const tabTargets: FocusTarget[] = workspaceSelectionMode ? [] : ["input"]
 
       if (!snapshot.leftSidebarCollapsed && !workspaceTreeCollapsed) {
         tabTargets.push("workspace")
@@ -2843,10 +2991,10 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
           flexShrink: 1,
         }}
       >
-        {!snapshot.leftSidebarCollapsed && (
+        {leftVisible && (
           <box
             id="pc-sidebar"
-            width={leftColumnWidth}
+            width={workspaceSelectionMode ? "100%" : leftColumnWidth}
             backgroundColor="#11151f"
             shouldFill
             style={{
@@ -2855,6 +3003,33 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
               paddingRight: 1,
             }}
           >
+            {workspaceSelectionMode && (
+              <box
+                id="pc-lobby-title"
+                style={{
+                  flexDirection: "column",
+                  marginTop: 1,
+                  marginBottom: 1,
+                  flexShrink: 0,
+                }}
+              >
+                <text content="██████╗ ██╗██████╗ ██╗   ██╗ ██████╗████████╗ ██████╗ ██████╗" fg="#93c5fd" wrapMode="none" />
+                <text content="██╔══██╗██║██╔══██╗██║   ██║██╔════╝╚══██╔══╝██╔═══██╗██╔══██╗" fg="#93c5fd" wrapMode="none" />
+                <text content="██████╔╝██║██║  ██║██║   ██║██║        ██║   ██║   ██║██████╔╝" fg="#bfdbfe" wrapMode="none" />
+                <text content="██╔═══╝ ██║██║  ██║██║   ██║██║        ██║   ██║   ██║██╔══██╗" fg="#bfdbfe" wrapMode="none" />
+                <text content="██║     ██║██████╔╝╚██████╔╝╚██████╗   ██║   ╚██████╔╝██║  ██║" fg="#dbeafe" wrapMode="none" />
+                <text content="╚═╝     ╚═╝╚═════╝  ╚═════╝  ╚═════╝   ╚═╝    ╚═════╝ ╚═╝  ╚═╝" fg="#dbeafe" wrapMode="none" />
+                <text
+                  content="Select a workspace from the list, or create one from a local repo path."
+                  fg="#94a3b8"
+                  wrapMode="word"
+                  style={{
+                    marginTop: 1,
+                  }}
+                />
+              </box>
+            )}
+
             <box
               id="pc-workspace-tree-section"
               style={{
@@ -3049,6 +3224,22 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                 flexShrink: 0,
               }}
             >
+              {workspaceSelectionMode && (
+                <box
+                  id="pc-create-workspace-btn"
+                  onMouseDown={(event) => {
+                    event.preventDefault()
+                    setCreateWorkspaceModalVisible(true)
+                  }}
+                  style={{
+                    flexDirection: "row",
+                    marginBottom: 1,
+                  }}
+                >
+                  <text content="[+ Create workspace]" fg="#86efac" wrapMode="none" selectable={false} />
+                </box>
+              )}
+
               <text id="pc-workspace-version" content={`Piductor ${APP_VERSION}`} fg="#94a3b8" wrapMode="none" />
               <text
                 id="pc-workspace-archive-tip"
@@ -3060,7 +3251,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
           </box>
         )}
 
-        {leftVisible && (
+        {!workspaceSelectionMode && leftVisible && (
           <box
             id="pc-left-resizer"
             width={1}
@@ -3083,14 +3274,15 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
           />
         )}
 
-        <box
-          id="pc-center"
-          shouldFill
-          style={{
-            flexDirection: "column",
-            flexGrow: 2,
-          }}
-        >
+        {!workspaceSelectionMode && (
+          <box
+            id="pc-center"
+            shouldFill
+            style={{
+              flexDirection: "column",
+              flexGrow: 2,
+            }}
+          >
           <box
             id="pc-conversation-box"
             backgroundColor="#100f13"
@@ -3226,7 +3418,8 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
               width="100%"
             />
           </box>
-        </box>
+          </box>
+        )}
 
         {rightVisible && (
           <box
@@ -3532,6 +3725,119 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
           </box>
         )}
       </box>
+
+      {createWorkspaceModalVisible && (
+        <box
+          id="pc-create-workspace-modal-backdrop"
+          position="absolute"
+          left={0}
+          top={0}
+          width="100%"
+          height="100%"
+          backgroundColor="#090d15"
+          onMouseDown={(event) => {
+            event.preventDefault()
+            setCreateWorkspaceModalVisible(false)
+          }}
+          style={{
+            zIndex: 95,
+          }}
+        >
+          <box
+            id="pc-create-workspace-modal"
+            position="absolute"
+            left="50%"
+            top="50%"
+            width={72}
+            height={11}
+            marginLeft={-36}
+            marginTop={-5}
+            border
+            borderStyle="double"
+            borderColor="#60a5fa"
+            backgroundColor="#0f172a"
+            title="Create workspace"
+            titleAlignment="center"
+            onMouseDown={(event) => {
+              event.preventDefault()
+            }}
+            style={{
+              flexDirection: "column",
+              paddingLeft: 1,
+              paddingRight: 1,
+              paddingTop: 1,
+              paddingBottom: 1,
+            }}
+          >
+            <text content="Local repo path" fg="#bfdbfe" wrapMode="none" selectable={false} />
+            <textarea
+              id="pc-create-workspace-path"
+              ref={createPathRef}
+              focused={createWorkspaceModalVisible}
+              placeholder="~/Projects/my-repo"
+              onSubmit={() => {
+                void submitCreateWorkspaceFromModal()
+              }}
+              keyBindings={[
+                { name: "return", action: "submit" },
+                { name: "linefeed", action: "submit" },
+              ]}
+              textColor="#f9fafb"
+              focusedTextColor="#ffffff"
+              placeholderColor="#6b7280"
+              backgroundColor="#111827"
+              focusedBackgroundColor="#0b1220"
+              cursorColor="#f9fafb"
+              wrapMode="none"
+              height={3}
+              width="100%"
+              style={{
+                marginTop: 1,
+                flexShrink: 0,
+              }}
+            />
+
+            <box
+              id="pc-create-workspace-modal-actions"
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                marginTop: 1,
+                flexShrink: 0,
+              }}
+            >
+              <box
+                id="pc-create-workspace-modal-ok"
+                onMouseDown={(event) => {
+                  event.preventDefault()
+                  void submitCreateWorkspaceFromModal()
+                }}
+              >
+                <text content="[OK]" fg="#86efac" wrapMode="none" selectable={false} />
+              </box>
+
+              <text content=" " fg="#94a3b8" wrapMode="none" selectable={false} />
+
+              <box
+                id="pc-create-workspace-modal-cancel"
+                onMouseDown={(event) => {
+                  event.preventDefault()
+                  setCreateWorkspaceModalVisible(false)
+                }}
+              >
+                <text content="[Cancel]" fg="#fca5a5" wrapMode="none" selectable={false} />
+              </box>
+
+              <text
+                content="  Enter local repo path · Esc to cancel"
+                fg="#64748b"
+                wrapMode="none"
+                selectable={false}
+              />
+            </box>
+          </box>
+        </box>
+      )}
 
       {snapshot.diffModalVisible && (
         <box
