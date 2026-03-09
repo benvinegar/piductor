@@ -2403,16 +2403,18 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                             marginBottom: isRepoRow ? 0 : 1,
                           }}
                         >
-                          <text
-                            id={`pc-workspace-tree-row-marker-${index}`}
-                            content={marker}
-                            fg={selected ? "#93c5fd" : "#64748b"}
-                            selectable={false}
-                            style={{
-                              flexShrink: 0,
-                              marginRight: 1,
-                            }}
-                          />
+                          {!isRepoRow && (
+                            <text
+                              id={`pc-workspace-tree-row-marker-${index}`}
+                              content={marker}
+                              fg={selected ? "#93c5fd" : "#64748b"}
+                              selectable={false}
+                              style={{
+                                flexShrink: 0,
+                                marginRight: 1,
+                              }}
+                            />
+                          )}
 
                           {!isRepoRow && (
                             <text
