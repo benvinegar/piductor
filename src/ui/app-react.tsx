@@ -205,6 +205,8 @@ export interface AppSnapshot {
   selectedWorkspaceId: number | null
   themeKey: ThemeKey
   sendMode: SendMode
+  planBuildMode: "plan" | "build"
+  modelLabel: string
   leftSidebarCollapsed: boolean
   rightSidebarCollapsed: boolean
   agentBusy: boolean
@@ -447,6 +449,8 @@ export class PiConductorApp {
     selectedWorkspaceId: null,
     themeKey: DEFAULT_THEME_KEY,
     sendMode: this.sendModeState.defaultMode,
+    planBuildMode: "plan",
+    modelLabel: "<model>",
     leftSidebarCollapsed: false,
     rightSidebarCollapsed: false,
     agentBusy: false,
@@ -532,6 +536,7 @@ export class PiConductorApp {
       : ""
     const thinkingPreview = compactThinkingPreview(liveThinkingRaw || persistedThinkingPreview)
     const thinkingActive = selectedWorkspaceId ? this.agentTurnsInFlight.has(selectedWorkspaceId) : false
+    const activeSendMode = this.getActiveSendMode()
 
     this.snapshot = {
       repos: [...this.repos],
@@ -545,7 +550,9 @@ export class PiConductorApp {
       selectedRepoId: this.selectedRepoId,
       selectedWorkspaceId: this.selectedWorkspaceId,
       themeKey: this.themeKey,
-      sendMode: this.getActiveSendMode(),
+      sendMode: activeSendMode,
+      planBuildMode: activeSendMode === "prompt" ? "plan" : "build",
+      modelLabel: this.getSelectedModelLabel(),
       leftSidebarCollapsed: this.leftSidebarCollapsed,
       rightSidebarCollapsed: this.rightSidebarCollapsed,
       agentBusy: this.agentBusy,
@@ -2991,6 +2998,24 @@ export class PiConductorApp {
     return this.getSendModeForWorkspace(this.selectedWorkspaceId)
   }
 
+  private getSelectedModelLabel(): string {
+    const workspace = this.getSelectedWorkspace()
+    if (!workspace) {
+      return this.config.defaultModel ?? "<model not set>"
+    }
+
+    const agent = this.store.getAgent(workspace.id)
+    return agent?.model ?? this.config.defaultModel ?? "<model not set>"
+  }
+
+  public togglePlanBuildModeForCurrentSelection() {
+    const current = this.getActiveSendMode()
+    const next: SendMode = current === "prompt" ? "follow_up" : "prompt"
+    this.setSendModeForCurrentSelection(next)
+    this.refreshStatusPanel()
+    this.emitSnapshot()
+  }
+
   private setSendModeForCurrentSelection(mode: SendMode) {
     this.sendModeState = setWorkspaceSendMode(this.sendModeState, this.selectedWorkspaceId, mode)
 
@@ -4564,15 +4589,6 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                 paddingRight: 1,
               }}
             >
-              <text
-                id="pc-compose-hint"
-                content={`${hasLoadingToken ? `${composerSpinner} ` : ""}Composer · /help · /mode · /theme`}
-                fg={hasLoadingToken ? colors.accent : colors.textMuted}
-                style={{
-                  flexShrink: 0,
-                }}
-              />
-
               <textarea
                 id="pc-input"
                 ref={composerRef}
@@ -4604,6 +4620,45 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                 wrapMode="word"
                 height={3}
               />
+
+              <box
+                id="pc-compose-footer"
+                height={1}
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  marginTop: 1,
+                  flexShrink: 0,
+                }}
+              >
+                <box
+                  id="pc-compose-mode-toggle"
+                  onMouseDown={(event) => {
+                    event.preventDefault()
+                    app.togglePlanBuildModeForCurrentSelection()
+                  }}
+                >
+                  <text
+                    content={`[${snapshot.planBuildMode === "plan" ? "Plan" : "Build"} mode]`}
+                    fg={colors.accent}
+                    wrapMode="none"
+                    selectable={false}
+                  />
+                </box>
+
+                <text content="  " fg={colors.textMuted} wrapMode="none" selectable={false} />
+
+                <text
+                  content={`Model: ${snapshot.modelLabel}`}
+                  fg={colors.textMuted}
+                  wrapMode="none"
+                  selectable={false}
+                  style={{
+                    flexGrow: 1,
+                    flexShrink: 1,
+                  }}
+                />
+              </box>
             </box>
           </box>
             </box>
