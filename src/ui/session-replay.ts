@@ -1,11 +1,18 @@
+import { summarizeToolCall, summarizeToolError } from "./agent-activity"
+
 type SessionContentBlock = {
   type?: string
   text?: string
+  thinking?: string
+  name?: string
+  arguments?: unknown
 }
 
 type SessionMessageRecord = {
   role?: string
   content?: unknown
+  toolName?: string
+  isError?: boolean
 }
 
 type SessionEntry = {
@@ -13,32 +20,48 @@ type SessionEntry = {
   message?: SessionMessageRecord
 }
 
-function extractText(value: unknown): string {
-  if (typeof value === "string") {
-    return value.trim()
+function appendNonEmptyLines(lines: string[], value: string, prefix = "") {
+  for (const row of value.split(/\r?\n/)) {
+    const trimmed = row.trim()
+    if (trimmed.length === 0) {
+      continue
+    }
+
+    lines.push(prefix.length > 0 ? `${prefix}${trimmed}` : trimmed)
+  }
+}
+
+function replayAssistantContent(lines: string[], content: unknown) {
+  if (typeof content === "string") {
+    appendNonEmptyLines(lines, content)
+    return
   }
 
-  if (!Array.isArray(value)) {
-    return ""
+  if (!Array.isArray(content)) {
+    return
   }
 
-  const text = value
-    .map((block) => {
-      if (!block || typeof block !== "object") {
-        return ""
-      }
+  for (const blockValue of content) {
+    if (!blockValue || typeof blockValue !== "object") {
+      continue
+    }
 
-      const content = block as SessionContentBlock
-      if (typeof content.text === "string") {
-        return content.text
-      }
+    const block = blockValue as SessionContentBlock
 
-      return ""
-    })
-    .filter(Boolean)
-    .join("\n")
+    if (block.type === "thinking" && typeof block.thinking === "string") {
+      appendNonEmptyLines(lines, block.thinking, "[thinking] ")
+      continue
+    }
 
-  return text.trim()
+    if (block.type === "toolCall") {
+      lines.push(`[tool] ${summarizeToolCall(block.name, block.arguments)}`)
+      continue
+    }
+
+    if (typeof block.text === "string") {
+      appendNonEmptyLines(lines, block.text)
+    }
+  }
 }
 
 export function replaySessionMessagesToLogLines(sessionJsonl: string, maxLines = 500): string[] {
@@ -64,23 +87,32 @@ export function replaySessionMessagesToLogLines(sessionJsonl: string, maxLines =
 
     const role = parsed.message.role
     if (role === "user") {
-      const content = extractText(parsed.message.content)
-      if (content.length > 0) {
-        lines.push(`[you/prompt] ${content}`)
+      if (typeof parsed.message.content === "string") {
+        appendNonEmptyLines(lines, parsed.message.content, "[you/prompt] ")
+      } else if (Array.isArray(parsed.message.content)) {
+        for (const blockValue of parsed.message.content) {
+          if (!blockValue || typeof blockValue !== "object") {
+            continue
+          }
+
+          const block = blockValue as SessionContentBlock
+          if (typeof block.text === "string") {
+            appendNonEmptyLines(lines, block.text, "[you/prompt] ")
+          }
+        }
       }
       continue
     }
 
     if (role === "assistant") {
-      const content = extractText(parsed.message.content)
-      if (content.length > 0) {
-        for (const line of content.split(/\r?\n/)) {
-          if (line.trim().length > 0) {
-            lines.push(line)
-          }
-        }
-      }
+      replayAssistantContent(lines, parsed.message.content)
       lines.push("[assistant-break]")
+      continue
+    }
+
+    if (role === "toolResult" && parsed.message.isError) {
+      const detail = summarizeToolError(parsed.message.toolName, { content: parsed.message.content })
+      lines.push(`[tool:error] ${detail}`)
     }
   }
 

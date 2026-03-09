@@ -16,7 +16,7 @@ Built with:
 - Send agent messages in `prompt`, `steer`, or `follow_up` mode
 - Stream assistant output into a chat-style markdown transcript
 - Resume prior workspace sessions after app restart (restores selection and conversation replay)
-- Surface thinking/tool/status events in a readable way
+- Surface thinking/tool/status events in a persistent Codex-like timeline (no disappearing action trail)
 - Run setup/run/archive scripts per workspace
 - Archive and restore workspaces
 - Show per-file change stats (`+/-`) in a review panel

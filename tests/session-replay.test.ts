@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import { replaySessionMessagesToLogLines } from "../src/ui/session-replay"
 
 describe("replaySessionMessagesToLogLines", () => {
-  it("replays user and assistant messages", () => {
+  it("replays user and assistant text messages", () => {
     const jsonl = [
       JSON.stringify({ type: "session", id: "s1" }),
       JSON.stringify({
@@ -19,20 +19,41 @@ describe("replaySessionMessagesToLogLines", () => {
     expect(lines).toEqual(["[you/prompt] hello", "hi there", "[assistant-break]"])
   })
 
-  it("handles assistant multiline blocks", () => {
+  it("replays assistant thinking and tool calls", () => {
     const jsonl = JSON.stringify({
       type: "message",
       message: {
         role: "assistant",
         content: [
-          { type: "text", text: "line 1" },
-          { type: "text", text: "line 2" },
+          { type: "thinking", thinking: "check references" },
+          { type: "toolCall", name: "read", arguments: { path: "src/events.ts" } },
+          { type: "text", text: "Done" },
         ],
       },
     })
 
     const lines = replaySessionMessagesToLogLines(jsonl)
-    expect(lines).toEqual(["line 1", "line 2", "[assistant-break]"])
+    expect(lines).toEqual([
+      "[thinking] check references",
+      "[tool] Read `src/events.ts`",
+      "Done",
+      "[assistant-break]",
+    ])
+  })
+
+  it("replays tool result errors", () => {
+    const jsonl = JSON.stringify({
+      type: "message",
+      message: {
+        role: "toolResult",
+        toolName: "bash",
+        isError: true,
+        content: [{ type: "text", text: "permission denied" }],
+      },
+    })
+
+    const lines = replaySessionMessagesToLogLines(jsonl)
+    expect(lines).toEqual(["[tool:error] Bash failed: `permission denied`"])
   })
 
   it("ignores invalid json lines and enforces max line window", () => {

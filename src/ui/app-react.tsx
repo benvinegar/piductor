@@ -82,6 +82,7 @@ import { killProcessByPid } from "../agent/process-kill"
 import { UiFlushScheduler } from "./flush-scheduler"
 import { consumeBufferedLines } from "../run/stream-buffer"
 import { DEFAULT_CONVERSATION, toConversationMarkdown as renderConversationMarkdown } from "./conversation-render"
+import { summarizeToolCall, summarizeToolError } from "./agent-activity"
 import { replaySessionMessagesToLogLines } from "./session-replay"
 import {
   clearDraftForWorkspace,
@@ -2152,12 +2153,18 @@ export class PiConductorApp {
         this.refreshDiffPanel()
         break
 
-      case "tool_execution_start":
-        this.appendWorkspaceLog(workspaceId, `[tool] ${event.toolName} start`)
+      case "tool_execution_start": {
+        const summary = summarizeToolCall(event.toolName, event.args)
+        this.appendWorkspaceLog(workspaceId, `[tool] ${summary}`)
         break
+      }
 
       case "tool_execution_end": {
-        this.appendWorkspaceLog(workspaceId, `[tool] ${event.toolName} ${event.isError ? "error" : "ok"}`)
+        if (event.isError) {
+          const failure = summarizeToolError(event.toolName, event.result)
+          this.appendWorkspaceLog(workspaceId, `[tool:error] ${failure}`)
+        }
+
         const runtime = this.getWorkspaceRuntimeState(workspaceId)
         this.setWorkspaceRuntimeState(workspaceId, {
           toolCallCount: runtime.toolCallCount + 1,
@@ -2284,21 +2291,47 @@ export class PiConductorApp {
 
   private appendThinkingStream(workspaceId: number, delta: string) {
     const current = this.thinkingPartialByWorkspace.get(workspaceId) ?? ""
-    const combined = `${current}${delta}`
-    const clipped = combined.slice(-640)
-    this.thinkingPartialByWorkspace.set(workspaceId, clipped)
-    this.lastThinkingPreviewByWorkspace.set(workspaceId, compactThinkingPreview(clipped))
+    const consumed = consumeBufferedLines(current, delta, MAX_STREAM_REMAINDER_CHARS)
+
+    let previewSource = consumed.remainder
+
+    for (const line of consumed.lines) {
+      this.appendThinkingLine(workspaceId, line)
+      if (line.trim().length > 0) {
+        previewSource = line
+      }
+    }
+
+    this.thinkingPartialByWorkspace.set(workspaceId, consumed.remainder)
+
+    const preview = compactThinkingPreview(previewSource)
+    if (preview.length > 0) {
+      this.lastThinkingPreviewByWorkspace.set(workspaceId, preview)
+    }
+  }
+
+  private appendThinkingLine(workspaceId: number, line: string) {
+    const normalized = line.replace(/\t/g, "  ").trimEnd()
+    if (normalized.length === 0) {
+      this.appendWorkspaceLog(workspaceId, "[thinking]")
+      return
+    }
+
+    this.appendWorkspaceLog(workspaceId, `[thinking] ${normalized}`)
   }
 
   private flushThinkingPartial(workspaceId: number, persist = true) {
     const partial = this.thinkingPartialByWorkspace.get(workspaceId) ?? ""
 
-    if (persist) {
+    if (persist && partial.trim().length > 0) {
+      this.appendThinkingLine(workspaceId, partial)
       const preview = compactThinkingPreview(partial)
       if (preview.length > 0) {
         this.lastThinkingPreviewByWorkspace.set(workspaceId, preview)
       }
-    } else {
+    }
+
+    if (!persist) {
       this.lastThinkingPreviewByWorkspace.delete(workspaceId)
     }
 
@@ -3348,9 +3381,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
   const composerSpinner = hasLoadingToken ? renderLoadingTokens(LOADING_TOKEN, loadingFrameIndex) : ""
   const thinkingIndicatorText = snapshot.thinkingActive
     ? `${composerSpinner || "•"} Thinking${snapshot.thinkingPreview ? ` · ${snapshot.thinkingPreview}` : "…"}`
-    : snapshot.thinkingPreview
-      ? `Thinking · ${snapshot.thinkingPreview}`
-      : ""
+    : ""
   const centerMarkdown = snapshot.conversationMarkdown
   const composerFirstLine = composerText.split(/\r?\n/, 1)[0] ?? ""
   const hasSlashCommandPrefix = composerFirstLine.trimStart().startsWith("/")
@@ -4214,11 +4245,11 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                 width="100%"
               />
 
-              {(snapshot.thinkingActive || snapshot.thinkingPreview.length > 0) && (
+              {snapshot.thinkingActive && (
                 <text
                   id="pc-thinking-indicator"
                   content={thinkingIndicatorText}
-                  fg={snapshot.thinkingActive ? "#93c5fd" : "#64748b"}
+                  fg="#93c5fd"
                   wrapMode="word"
                   style={{
                     marginTop: 1,

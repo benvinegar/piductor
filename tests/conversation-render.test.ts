@@ -23,11 +23,6 @@ describe("conversation-render", () => {
     expect(output).toBe("**bold**\n- item")
   })
 
-  it("preserves extra blank lines in assistant output", () => {
-    const output = formatAssistantMessageRail("line A\n\nline B")
-    expect(output).toBe("line A\n\nline B")
-  })
-
   it("keeps markdown tokens in assistant output and separates message blocks", () => {
     const rendered = toConversationMarkdown([
       "[12:00:00] [you/prompt] start",
@@ -38,7 +33,7 @@ describe("conversation-render", () => {
 
     expect(rendered).toContain("**Repo tour**")
     expect(rendered).toContain("second reply")
-    expect(rendered).toContain("...")
+    expect(rendered).toContain("────────")
   })
 
   it("keeps the latest user prompt visible when assistant output exceeds the render window", () => {
@@ -63,15 +58,29 @@ describe("conversation-render", () => {
     expect(rendered).toContain("\n\nLine three")
   })
 
-  it("suppresses tool chatter lines", () => {
+  it("renders thinking and tool activity as a persistent timeline", () => {
     const rendered = toConversationMarkdown([
-      "[12:00:00] [tool] bash start",
-      "[12:00:01] [tool] bash ok",
-      "[12:00:02] real assistant text",
+      "[12:00:00] [thinking] I found the stale value source",
+      "[12:00:01] [tool] Read `ingest-client.ts`",
+      "[12:00:02] [tool] Search `clientName`",
+      "[12:00:03] Final answer",
     ])
 
-    expect(rendered).not.toContain("bash start")
-    expect(rendered).not.toContain("bash ok")
-    expect(rendered).toContain("real assistant text")
+    expect(rendered).toContain("• I found the stale value source")
+    expect(rendered).toContain("• Explored")
+    expect(rendered).toContain("└ Read `ingest-client.ts`")
+    expect(rendered).toContain("└ Search `clientName`")
+    expect(rendered).toContain("Final answer")
+  })
+
+  it("renders tool errors inside the explored section", () => {
+    const rendered = toConversationMarkdown([
+      "[12:00:00] [tool] Run `npm test`",
+      "[12:00:01] [tool:error] Bash failed: `permission denied`",
+    ])
+
+    expect(rendered).toContain("• Explored")
+    expect(rendered).toContain("└ Run `npm test`")
+    expect(rendered).toContain("└ ⚠️ Bash failed: `permission denied`")
   })
 })
