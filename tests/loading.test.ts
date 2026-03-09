@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { LOADING_TOKEN, renderLoadingTokens } from "../src/loading"
+import { LOADING_TOKEN, renderLoadingTokens } from "../src/ui/loading"
 
 describe("renderLoadingTokens", () => {
   it("replaces loading token with frame glyph", () => {

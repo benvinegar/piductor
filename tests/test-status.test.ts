@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { formatTestRunStatus, nextTestRunFinished, nextTestRunStarted } from "../src/test-status"
+import { formatTestRunStatus, nextTestRunFinished, nextTestRunStarted } from "../src/run/test-status"
 
 describe("test status state transitions", () => {
   it("marks started test runs as running", () => {

@@ -1,1 +1,1 @@
-export { PiConductorApp } from "./app-react"
+export { PiConductorApp } from "./ui/app-react"

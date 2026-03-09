@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
-import { buildWorkspaceScriptEnv, workspaceBasePort } from "../src/script-env"
-import type { RepoRecord, WorkspaceRecord } from "../src/types"
+import { buildWorkspaceScriptEnv, workspaceBasePort } from "../src/run/script-env"
+import type { RepoRecord, WorkspaceRecord } from "../src/core/types"
 
 const repo: RepoRecord = {
   id: 1,

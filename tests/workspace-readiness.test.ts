@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { evaluateWorkspaceReadiness, formatWorkspaceReadinessLabel } from "../src/workspace-readiness"
+import { evaluateWorkspaceReadiness, formatWorkspaceReadinessLabel } from "../src/workspace/readiness"
 
 describe("evaluateWorkspaceReadiness", () => {
   it("blocks readiness while runs are active", () => {

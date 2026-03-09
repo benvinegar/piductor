@@ -1,7 +1,7 @@
 import { mkdirSync } from "node:fs"
 import path from "node:path"
 import { Database } from "bun:sqlite"
-import { nextAgentTimingState } from "./agent-state"
+import { nextAgentTimingState } from "../agent/state"
 import type { AgentRecord, AgentRuntimeStatus, RepoRecord, WorkspaceRecord } from "./types"
 
 function nowIso() {

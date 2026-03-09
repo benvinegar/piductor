@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { consumeBufferedLines } from "../src/stream-buffer"
+import { consumeBufferedLines } from "../src/run/stream-buffer"
 
 describe("stream-buffer", () => {
   it("emits full lines and keeps trailing remainder", () => {

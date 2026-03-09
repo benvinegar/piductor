@@ -1,4 +1,4 @@
-import type { RepoRecord, WorkspaceRecord } from "./types"
+import type { RepoRecord, WorkspaceRecord } from "../core/types"
 
 const BASE_PORT = 43000
 const PORT_BLOCK_SIZE = 10

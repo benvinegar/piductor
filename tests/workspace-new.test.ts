@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { parseWorkspaceNewArgs, suggestWorkspaceNameFromBranch, workspaceNewUsage } from "../src/workspace-new"
+import { parseWorkspaceNewArgs, suggestWorkspaceNameFromBranch, workspaceNewUsage } from "../src/workspace/new"
 
 describe("workspaceNewUsage", () => {
   it("mentions branch-based creation", () => {

@@ -1,4 +1,4 @@
-import type { ScriptConfig } from "./types"
+import type { ScriptConfig } from "../core/types"
 
 export type RunMode = NonNullable<ScriptConfig["runMode"]>
 

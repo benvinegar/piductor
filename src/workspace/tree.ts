@@ -1,4 +1,4 @@
-import type { AgentRuntimeStatus } from "./types"
+import type { AgentRuntimeStatus } from "../core/types"
 
 export const TREE_REPO_PREFIX = "repo:"
 export const TREE_WORKSPACE_PREFIX = "workspace:"

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { nextAgentTimingState } from "../src/agent-state"
+import { nextAgentTimingState } from "../src/agent/state"
 
 describe("agent-state timing helpers", () => {
   it("sets startedAt when entering active state and preserves it while active", () => {

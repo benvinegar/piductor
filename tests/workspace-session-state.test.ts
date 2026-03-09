@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import type { SendMode } from "../src/types"
+import type { SendMode } from "../src/core/types"
 import {
   clearDraftForWorkspace,
   getWorkspaceSendMode,
@@ -7,7 +7,7 @@ import {
   switchWorkspaceDraft,
   type DraftState,
   type SendModeState,
-} from "../src/workspace-session-state"
+} from "../src/workspace/session-state"
 
 describe("workspace-session-state helpers", () => {
   it("returns default send mode when no workspace-specific override exists", () => {

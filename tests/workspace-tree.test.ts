@@ -8,7 +8,7 @@ import {
   parseWorkspaceTreeValue,
   repoTreeValue,
   workspaceTreeValue,
-} from "../src/workspace-tree"
+} from "../src/workspace/tree"
 
 describe("workspace-tree helpers", () => {
   it("builds repo and workspace tree values", () => {

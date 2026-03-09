@@ -1,4 +1,4 @@
-import type { SendMode } from "./types"
+import type { SendMode } from "../core/types"
 
 export interface SendModeState {
   defaultMode: SendMode

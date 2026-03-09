@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
-import { loadConfig } from "./config"
-import { Store } from "./db"
+import { loadConfig } from "./core/config"
+import { Store } from "./core/db"
 import { PiConductorApp } from "./app"
 
 async function main() {

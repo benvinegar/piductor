@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { normalizeRunMode, parseRunCommandArgs, runCommandUsage } from "../src/run-command"
+import { normalizeRunMode, parseRunCommandArgs, runCommandUsage } from "../src/run/command"
 
 describe("normalizeRunMode", () => {
   it("defaults invalid/undefined values to concurrent", () => {

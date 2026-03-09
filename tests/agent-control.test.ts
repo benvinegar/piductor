@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { parseAgentCommand, resolveRestartModel } from "../src/agent-control"
+import { parseAgentCommand, resolveRestartModel } from "../src/agent/control"
 
 describe("agent-control helpers", () => {
   it("parses supported agent commands", () => {

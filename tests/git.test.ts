@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { parsePorcelainStatusLine, slugify } from "../src/git"
+import { parsePorcelainStatusLine, slugify } from "../src/vcs/git"
 
 describe("slugify", () => {
   it("normalizes mixed case and punctuation", () => {

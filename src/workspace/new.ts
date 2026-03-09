@@ -1,4 +1,4 @@
-import { slugify } from "./git"
+import { slugify } from "../vcs/git"
 
 export interface ParsedWorkspaceNewCommand {
   workspaceName: string

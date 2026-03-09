@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest"
-import { killProcessByPid } from "../src/process-kill"
+import { killProcessByPid } from "../src/agent/process-kill"
 
 describe("process-kill helpers", () => {
   it("kills process group first on non-windows", () => {

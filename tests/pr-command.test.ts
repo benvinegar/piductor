@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { extractFirstUrl, parsePrCreateArgs, prCreateUsage } from "../src/pr-command"
+import { extractFirstUrl, parsePrCreateArgs, prCreateUsage } from "../src/vcs/pr-command"
 
 describe("parsePrCreateArgs", () => {
   it("accepts empty args", () => {

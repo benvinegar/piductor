@@ -1,4 +1,4 @@
-import type { AgentRuntimeStatus } from "./types"
+import type { AgentRuntimeStatus } from "../core/types"
 
 export interface AgentTimingState {
   status: AgentRuntimeStatus

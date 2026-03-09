@@ -13,9 +13,9 @@ import {
 } from "@opentui/core"
 import { createRoot, useKeyboard, useTerminalDimensions, type Root } from "@opentui/react"
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
-import { Store } from "./db"
-import { PiRpcProcess } from "./pi-rpc"
-import type { AppConfig, RepoRecord, SendMode, WorkspaceRecord } from "./types"
+import { Store } from "../core/db"
+import { PiRpcProcess } from "../network/pi-rpc"
+import type { AppConfig, RepoRecord, SendMode, WorkspaceRecord } from "../core/types"
 import {
   addWorktreeForBranch,
   cloneRepo,
@@ -28,7 +28,7 @@ import {
   listBranchRefs,
   removeWorktree,
   resolveWorkspaceBaseRef,
-} from "./git"
+} from "../vcs/git"
 import {
   encodeWorkspaceTreeRowMeta,
   formatWorkspaceActivityAge,
@@ -39,23 +39,23 @@ import {
   repoTreeValue,
   TREE_REPO_PREFIX,
   workspaceTreeValue,
-} from "./workspace-tree"
-import { parseWorkspaceNewArgs, workspaceNewUsage } from "./workspace-new"
-import { extractFirstUrl, parsePrCreateArgs, prCreateUsage } from "./pr-command"
-import { buildWorkspaceScriptEnv } from "./script-env"
-import { shouldStopExistingRun, stopSignalSequence } from "./run-policy"
-import { normalizeRunMode, parseRunCommandArgs, runCommandUsage, type RunMode } from "./run-command"
-import { formatRunExitSummary, formatRunLogLine } from "./run-log"
-import { parseFileDiff, type DiffViewMode } from "./diff-review"
-import { formatTestRunStatus, nextTestRunFinished, nextTestRunStarted, type TestRunState } from "./test-status"
-import { evaluateWorkspaceReadiness, formatWorkspaceReadinessLabel } from "./workspace-readiness"
-import { diffFingerprintFromStats } from "./diff-fingerprint"
+} from "../workspace/tree"
+import { parseWorkspaceNewArgs, workspaceNewUsage } from "../workspace/new"
+import { extractFirstUrl, parsePrCreateArgs, prCreateUsage } from "../vcs/pr-command"
+import { buildWorkspaceScriptEnv } from "../run/script-env"
+import { shouldStopExistingRun, stopSignalSequence } from "../run/policy"
+import { normalizeRunMode, parseRunCommandArgs, runCommandUsage, type RunMode } from "../run/command"
+import { formatRunExitSummary, formatRunLogLine } from "../run/log"
+import { parseFileDiff, type DiffViewMode } from "../review/diff-review"
+import { formatTestRunStatus, nextTestRunFinished, nextTestRunStarted, type TestRunState } from "../run/test-status"
+import { evaluateWorkspaceReadiness, formatWorkspaceReadinessLabel } from "../workspace/readiness"
+import { diffFingerprintFromStats } from "../review/diff-fingerprint"
 import { LOADING_TOKEN, renderLoadingTokens } from "./loading"
-import { sanitizePiStderrLine, shouldSurfacePiStderr } from "./pi-stderr"
-import { parseAgentCommand, resolveRestartModel } from "./agent-control"
-import { killProcessByPid } from "./process-kill"
-import { UiFlushScheduler } from "./ui-flush-scheduler"
-import { consumeBufferedLines } from "./stream-buffer"
+import { sanitizePiStderrLine, shouldSurfacePiStderr } from "../network/pi-stderr"
+import { parseAgentCommand, resolveRestartModel } from "../agent/control"
+import { killProcessByPid } from "../agent/process-kill"
+import { UiFlushScheduler } from "./flush-scheduler"
+import { consumeBufferedLines } from "../run/stream-buffer"
 import { DEFAULT_CONVERSATION, toConversationMarkdown as renderConversationMarkdown } from "./conversation-render"
 import {
   clearDraftForWorkspace,
@@ -64,7 +64,7 @@ import {
   switchWorkspaceDraft,
   type DraftState,
   type SendModeState,
-} from "./workspace-session-state"
+} from "../workspace/session-state"
 
 const GLOBAL_LOG_STREAM_ID = 0
 const APP_VERSION = process.env.npm_package_version ?? "0.1.0"

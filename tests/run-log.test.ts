@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { formatRunExitSummary, formatRunLogLine } from "../src/run-log"
+import { formatRunExitSummary, formatRunLogLine } from "../src/run/log"
 
 describe("formatRunLogLine", () => {
   it("adds stable run id + source prefixes", () => {

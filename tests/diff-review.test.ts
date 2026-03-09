@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { parseFileDiff, selectDiffReviewHunk } from "../src/diff-review"
+import { parseFileDiff, selectDiffReviewHunk } from "../src/review/diff-review"
 
 const SAMPLE_DIFF = `diff --git a/src/a.ts b/src/a.ts
 index 1111111..2222222 100644

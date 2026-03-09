@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { shouldStopExistingRun, stopSignalSequence } from "../src/run-policy"
+import { shouldStopExistingRun, stopSignalSequence } from "../src/run/policy"
 
 describe("shouldStopExistingRun", () => {
   it("stops existing process only in nonconcurrent mode", () => {

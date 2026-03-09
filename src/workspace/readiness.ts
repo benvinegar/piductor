@@ -1,4 +1,4 @@
-import type { TestRunState } from "./test-status"
+import type { TestRunState } from "../run/test-status"
 
 export type WorkspaceReadiness = {
   ready: boolean

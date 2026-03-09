@@ -27,7 +27,7 @@ source ~/.bash_profile
 
 ### Controller + view split
 
-`src/app-react.tsx` contains both:
+`src/ui/app-react.tsx` contains both:
 
 1. **PiConductorApp** class (controller/state/side-effects)
 2. **PiConductorView** (React UI)
@@ -40,11 +40,11 @@ Treat this as a deliberate split:
 
 ### Important modules
 
-- `src/pi-rpc.ts`: manages Pi RPC subprocess and request/response lifecycle
-- `src/git.ts`: git clone/worktree/status helpers
-- `src/db.ts`: SQLite persistence (repos/workspaces/agents)
-- `src/config.ts`: user + project config merge
-- `src/types.ts`: domain types
+- `src/network/pi-rpc.ts`: manages Pi RPC subprocess and request/response lifecycle
+- `src/vcs/git.ts`: git clone/worktree/status helpers
+- `src/core/db.ts`: SQLite persistence (repos/workspaces/agents)
+- `src/core/config.ts`: user + project config merge
+- `src/core/types.ts`: domain types
 
 ## UI/UX invariants to preserve
 
@@ -148,7 +148,7 @@ If you add/rename commands, update:
 
 ## Persistence/data rules
 
-- DB schema lives in `src/db.ts` migration block
+- DB schema lives in `src/core/db.ts` migration block
 - Keep existing tables compatible unless migration is intentional
 - Workspaces are soft-archived in DB and worktree path is removed from git
 

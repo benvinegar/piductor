@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { diffFingerprintFromStats } from "../src/diff-fingerprint"
+import { diffFingerprintFromStats } from "../src/review/diff-fingerprint"
 
 describe("diffFingerprintFromStats", () => {
   it("returns empty fingerprint for no stats", () => {

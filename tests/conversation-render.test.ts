@@ -4,7 +4,7 @@ import {
   formatAssistantMessageRail,
   formatUserMessageBox,
   toConversationMarkdown,
-} from "../src/conversation-render"
+} from "../src/ui/conversation-render"
 
 describe("conversation-render", () => {
   it("returns default conversation when empty", () => {

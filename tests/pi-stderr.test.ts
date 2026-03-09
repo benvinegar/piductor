@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { sanitizePiStderrLine, shouldSurfacePiStderr } from "../src/pi-stderr"
+import { sanitizePiStderrLine, shouldSurfacePiStderr } from "../src/network/pi-stderr"
 
 describe("sanitizePiStderrLine", () => {
   it("removes ANSI escapes and carriage returns", () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest"
-import { UiFlushScheduler } from "../src/ui-flush-scheduler"
+import { UiFlushScheduler } from "../src/ui/flush-scheduler"
 
 describe("ui-flush-scheduler", () => {
   it("coalesces multiple schedules into one flush", () => {

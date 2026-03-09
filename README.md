@@ -140,12 +140,14 @@ Compatibility aliases are also provided with `CONDUCTOR_*` names.
 ## Project structure
 
 - `src/main.ts` — app entrypoint + signal handling
-- `src/app-react.tsx` — UI + application controller
-- `src/pi-rpc.ts` — Pi RPC subprocess transport
-- `src/git.ts` — git clone/worktree/status helpers
-- `src/db.ts` — SQLite persistence + migrations
-- `src/config.ts` — config loading/merging
-- `src/types.ts` — shared domain types
+- `src/ui/` — OpenTUI React view/controller shell (`app-react.tsx`, loading, rendering helpers)
+- `src/agent/` — agent lifecycle/control/state helpers
+- `src/network/` — Pi RPC transport + stderr filtering
+- `src/run/` — run/test command policy, logs, stream buffering, script env
+- `src/review/` — diff parsing/fingerprinting helpers
+- `src/workspace/` — workspace tree, new-workspace args, session/readiness logic
+- `src/vcs/` — git/worktree and PR command helpers
+- `src/core/` — config, DB, shared types
 
 ## Development
 
