@@ -48,6 +48,7 @@ import { normalizeRunMode, parseRunCommandArgs, runCommandUsage, type RunMode } 
 import { formatRunExitSummary, formatRunLogLine } from "./run-log"
 import { parseFileDiff, type DiffViewMode } from "./diff-review"
 import { formatTestRunStatus, nextTestRunFinished, nextTestRunStarted, type TestRunState } from "./test-status"
+import { evaluateWorkspaceReadiness, formatWorkspaceReadinessLabel } from "./workspace-readiness"
 import { LOADING_TOKEN, renderLoadingTokens } from "./loading"
 import { sanitizePiStderrLine, shouldSurfacePiStderr } from "./pi-stderr"
 import { parseAgentCommand, resolveRestartModel } from "./agent-control"
@@ -115,6 +116,14 @@ function workspaceStatusColor(status: string): string {
     default:
       return "#94a3b8"
   }
+}
+
+function diffFingerprintFromStats(stats: Array<{ path: string; added: number | null; removed: number | null; status: string }>): string {
+  if (stats.length === 0) {
+    return ""
+  }
+
+  return stats.map((entry) => `${entry.status}:${entry.path}:${entry.added ?? "?"}:${entry.removed ?? "?"}`).join("|")
 }
 
 type DiffRow = {
@@ -340,6 +349,8 @@ export class PiConductorApp {
   private diffText = "No workspace selected."
   private readonly selectedDiffPathByWorkspace = new Map<number, string>()
   private readonly selectedDiffHunkByWorkspace = new Map<number, number>()
+  private readonly diffFingerprintByWorkspace = new Map<number, string>()
+  private readonly reviewedDiffFingerprintByWorkspace = new Map<number, string>()
   private lastDiffReviewRefreshKey = ""
   private terminalText = "No workspace selected."
   private footerText = ""
@@ -1974,6 +1985,8 @@ export class PiConductorApp {
 
     if (openReview) {
       this.diffModalVisible = true
+      this.markDiffReviewed(workspace.id)
+      this.refreshStatusPanel()
       this.refreshDiffReviewPanel(true)
     }
 
@@ -1986,6 +1999,7 @@ export class PiConductorApp {
 
     if (this.diffRows.length === 0) {
       this.diffModalVisible = true
+      this.reviewedDiffFingerprintByWorkspace.delete(workspace.id)
       this.diffReviewTitle = "Review branch changes"
       this.diffReviewDiff = ""
       this.diffReviewFiletype = undefined
@@ -2003,6 +2017,8 @@ export class PiConductorApp {
     }
 
     this.diffModalVisible = true
+    this.markDiffReviewed(workspace.id)
+    this.refreshStatusPanel()
     this.refreshDiffReviewPanel(true)
     this.emitSnapshot()
   }
@@ -2045,6 +2061,16 @@ export class PiConductorApp {
       this.refreshDiffReviewPanel(true)
     }
     this.emitSnapshot()
+  }
+
+  private markDiffReviewed(workspaceId: number) {
+    const fingerprint = this.diffFingerprintByWorkspace.get(workspaceId)
+    if (!fingerprint) {
+      this.reviewedDiffFingerprintByWorkspace.delete(workspaceId)
+      return
+    }
+
+    this.reviewedDiffFingerprintByWorkspace.set(workspaceId, fingerprint)
   }
 
   private getSelectedWorkspace(): WorkspaceRecord | null {
@@ -2174,10 +2200,18 @@ export class PiConductorApp {
 
     const runCount = workspace ? this.runProcessCount(workspace.id) : 0
     const runState = runCount > 0 ? `running (${runCount})` : "idle"
-    const mergeState =
-      changedCount > 0 && runState === "idle" ? "Ready to merge" : changedCount > 0 ? "Changes pending" : "No changes yet"
     const testState = workspace ? this.lastTestRunByWorkspace.get(workspace.id) ?? null : null
     const testStatus = formatTestRunStatus(testState)
+    const diffFingerprint = workspace ? this.diffFingerprintByWorkspace.get(workspace.id) ?? "" : ""
+    const reviewedFingerprint = workspace ? this.reviewedDiffFingerprintByWorkspace.get(workspace.id) ?? null : null
+    const readiness = evaluateWorkspaceReadiness({
+      runCount,
+      changedCount,
+      testState,
+      diffFingerprint,
+      reviewedDiffFingerprint: reviewedFingerprint,
+    })
+    const readinessLabel = formatWorkspaceReadinessLabel(readiness)
 
     const agentStatus = agent?.status ?? "stopped"
     const turnInFlight = workspace ? this.agentTurnsInFlight.has(workspace.id) : false
@@ -2188,7 +2222,7 @@ export class PiConductorApp {
     const activeSendMode = this.getActiveSendMode()
 
     this.headerText = workspace
-      ? `${repo?.name ?? "repo"}/${workspace.name} · ${workspace.branch} · mode=${activeSendMode} · ${mergeState}`
+      ? `${repo?.name ?? "repo"}/${workspace.name} · ${workspace.branch} · mode=${activeSendMode} · ${readinessLabel}`
       : `Piductor · select a repo/workspace · mode=${activeSendMode}`
 
     const activityTime = agent?.lastEventAt ?? agent?.startedAt ?? agent?.stoppedAt ?? "<none>"
@@ -2200,7 +2234,8 @@ export class PiConductorApp {
       `activity   ${activityTime}`,
       `run        ${runState} · mode=${this.runMode}`,
       `tests      ${testStatus}`,
-      `changes    ${changedCount} files · ${mergeState}`,
+      `readiness  ${readinessLabel}`,
+      `changes    ${changedCount} files`,
     ]
 
     this.statusText = statusLines.join("\n")
@@ -2307,12 +2342,16 @@ export class PiConductorApp {
         this.diffText = "Working tree clean."
         this.selectedDiffPathByWorkspace.delete(workspace.id)
         this.selectedDiffHunkByWorkspace.delete(workspace.id)
+        this.diffFingerprintByWorkspace.set(workspace.id, "")
+        this.reviewedDiffFingerprintByWorkspace.delete(workspace.id)
         this.lastDiffReviewRefreshKey = ""
         if (this.diffModalVisible) {
           this.refreshDiffReviewPanel(true)
         }
         return
       }
+
+      this.diffFingerprintByWorkspace.set(workspace.id, diffFingerprintFromStats(stats))
 
       const visible = stats.slice(0, 120)
       this.diffRows = visible.map((entry) => ({
@@ -2344,6 +2383,8 @@ export class PiConductorApp {
       this.diffSelectedIndex = 0
       this.diffRows = []
       this.diffText = `Failed to read changes: ${safeErr(error)}`
+      this.diffFingerprintByWorkspace.delete(workspace.id)
+      this.reviewedDiffFingerprintByWorkspace.delete(workspace.id)
       this.lastDiffReviewRefreshKey = ""
       if (this.diffModalVisible) {
         this.refreshDiffReviewPanel(true)
