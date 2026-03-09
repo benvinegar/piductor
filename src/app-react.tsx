@@ -45,6 +45,8 @@ import { buildWorkspaceScriptEnv } from "./script-env"
 import { shouldStopExistingRun, stopSignalSequence } from "./run-policy"
 import { LOADING_TOKEN, renderLoadingTokens } from "./loading"
 import { sanitizePiStderrLine, shouldSurfacePiStderr } from "./pi-stderr"
+import { parseAgentCommand, resolveRestartModel } from "./agent-control"
+import { killProcessByPid } from "./process-kill"
 import { DEFAULT_CONVERSATION, toConversationMarkdown as renderConversationMarkdown } from "./conversation-render"
 import {
   clearDraftForWorkspace,
@@ -506,6 +508,8 @@ export class PiConductorApp {
         this.appendGlobalLog("  /workspace select <id|name>")
         this.appendGlobalLog("  /agent start [model]")
         this.appendGlobalLog("  /agent stop")
+        this.appendGlobalLog("  /agent restart [model]")
+        this.appendGlobalLog("  /agent kill")
         this.appendGlobalLog("  /agent list")
         this.appendGlobalLog("  /mode <prompt|steer|follow_up>")
         this.appendGlobalLog("  /pr create [--dry-run]")
@@ -679,7 +683,7 @@ export class PiConductorApp {
             return
           }
 
-          await this.stopAgent(workspace.id)
+          await this.stopAgent(workspace.id, { force: false, reason: "archive" })
 
           if (this.config.scripts.archive) {
             this.appendWorkspaceLog(workspace.id, `Running archive script: ${this.config.scripts.archive}`)
@@ -780,33 +784,42 @@ export class PiConductorApp {
       }
 
       case "agent": {
-        const sub = args[0]
-        if (sub === "start") {
-          const workspace = this.getSelectedWorkspace()
-          if (!workspace) {
-            this.appendGlobalLog("No workspace selected.")
-            return
-          }
-          await this.startAgent(workspace.id, args[1] || this.config.defaultModel)
+        const parsed = parseAgentCommand(args)
+        if (!parsed) {
+          this.appendGlobalLog("Usage: /agent start [model] | /agent stop | /agent restart [model] | /agent kill | /agent list")
           return
         }
 
-        if (sub === "stop") {
-          const workspace = this.getSelectedWorkspace()
-          if (!workspace) {
-            this.appendGlobalLog("No workspace selected.")
-            return
-          }
-          await this.stopAgent(workspace.id)
-          return
-        }
-
-        if (sub === "list") {
+        if (parsed.action === "list") {
           this.logAgentRegistry()
           return
         }
 
-        this.appendGlobalLog("Usage: /agent start [model] | /agent stop | /agent list")
+        const workspace = this.getSelectedWorkspace()
+        if (!workspace) {
+          this.appendGlobalLog("No workspace selected.")
+          return
+        }
+
+        if (parsed.action === "start") {
+          await this.startAgent(workspace.id, parsed.model || this.config.defaultModel)
+          return
+        }
+
+        if (parsed.action === "stop") {
+          await this.stopAgent(workspace.id, { force: false, reason: "manual stop" })
+          return
+        }
+
+        if (parsed.action === "restart") {
+          const current = this.store.getAgent(workspace.id)
+          const restartModel = resolveRestartModel(parsed.model, current?.model, this.config.defaultModel)
+          await this.stopAgent(workspace.id, { force: false, reason: "restart" })
+          await this.startAgent(workspace.id, restartModel)
+          return
+        }
+
+        await this.stopAgent(workspace.id, { force: true, reason: "manual kill" })
         return
       }
 
@@ -1128,14 +1141,48 @@ export class PiConductorApp {
     this.emitSnapshot()
   }
 
-  private async stopAgent(workspaceId: number) {
+  private async stopAgent(workspaceId: number, options: { force: boolean; reason: string }) {
+    const { force, reason } = options
     const agent = this.agentByWorkspace.get(workspaceId)
-    if (!agent) return
+    const persisted = this.store.getAgent(workspaceId)
+
+    if (!agent) {
+      if (force && persisted?.pid) {
+        const result = killProcessByPid(persisted.pid, { signal: "SIGKILL" })
+        if (result === "killed") {
+          this.appendWorkspaceLog(workspaceId, `[agent] killed stale pid ${persisted.pid} (${reason})`)
+        } else if (result === "missing") {
+          this.appendWorkspaceLog(workspaceId, `[agent] stale pid ${persisted.pid} already exited`)
+        } else {
+          this.appendWorkspaceLog(workspaceId, `[agent] failed to kill stale pid ${persisted.pid}`)
+        }
+      } else {
+        this.appendWorkspaceLog(workspaceId, "Agent is not running.")
+      }
+
+      this.agentTurnsInFlight.delete(workspaceId)
+      this.store.setAgentState({
+        workspaceId,
+        status: "stopped",
+        pid: null,
+        model: persisted?.model ?? null,
+        sessionId: null,
+      })
+      this.reloadWorkspaces(this.selectedWorkspaceId)
+      this.refreshStatusPanel()
+      this.refreshLogsPanel()
+      this.emitSnapshot()
+      return
+    }
 
     try {
-      await agent.stop()
+      if (force) {
+        await agent.kill()
+      } else {
+        await agent.stop()
+      }
     } catch (error) {
-      this.appendWorkspaceLog(workspaceId, `Error while stopping agent: ${safeErr(error)}`)
+      this.appendWorkspaceLog(workspaceId, `Error while ${force ? "killing" : "stopping"} agent: ${safeErr(error)}`)
     }
 
     this.agentByWorkspace.delete(workspaceId)
@@ -1144,10 +1191,10 @@ export class PiConductorApp {
       workspaceId,
       status: "stopped",
       pid: null,
-      model: null,
+      model: persisted?.model ?? null,
       sessionId: null,
     })
-    this.appendWorkspaceLog(workspaceId, "Agent stopped.")
+    this.appendWorkspaceLog(workspaceId, force ? `Agent killed (${reason}).` : `Agent stopped (${reason}).`)
     this.reloadWorkspaces(this.selectedWorkspaceId)
     this.refreshStatusPanel()
     this.refreshLogsPanel()
@@ -1677,11 +1724,11 @@ export class PiConductorApp {
   private logAgentRegistry() {
     const agents = this.store.listAgents()
     if (agents.length === 0) {
-      this.appendGlobalLog("No agent records yet.")
+      this.appendVisibleLog("No agent records yet.")
       return
     }
 
-    this.appendGlobalLog("Agents:")
+    this.appendVisibleLog("Agents:")
     for (const agent of agents) {
       const workspace = this.store.getWorkspaceById(agent.workspaceId)
       const repo = workspace ? this.store.getRepoById(workspace.repoId) : null
@@ -1689,10 +1736,20 @@ export class PiConductorApp {
       const lastEvent = agent.lastEventAt ?? "-"
       const started = agent.startedAt ?? "-"
 
-      this.appendGlobalLog(
+      this.appendVisibleLog(
         `  #${agent.workspaceId} ${label} · ${agent.status}${agent.pid ? ` (pid ${agent.pid})` : ""} · session=${agent.sessionId ?? "-"} · started=${started} · last=${lastEvent}`,
       )
     }
+  }
+
+  private appendVisibleLog(message: string) {
+    const workspace = this.getSelectedWorkspace()
+    if (workspace) {
+      this.appendWorkspaceLog(workspace.id, message)
+      return
+    }
+
+    this.appendGlobalLog(message)
   }
 
   private appendGlobalLog(message: string) {
@@ -1849,7 +1906,7 @@ export class PiConductorApp {
     }
 
     for (const [workspaceId] of this.agentByWorkspace.entries()) {
-      await this.stopAgent(workspaceId)
+      await this.stopAgent(workspaceId, { force: false, reason: "app shutdown" })
     }
 
     this.store.close()

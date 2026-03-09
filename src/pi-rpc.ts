@@ -140,6 +140,42 @@ export class PiRpcProcess {
     this.status = "stopped"
   }
 
+  async kill(): Promise<void> {
+    if (!this.child) {
+      this.status = "stopped"
+      return
+    }
+
+    const child = this.child
+    await new Promise<void>((resolve) => {
+      let settled = false
+      const finish = () => {
+        if (settled) return
+        settled = true
+        resolve()
+      }
+
+      const timer = setTimeout(() => {
+        finish()
+      }, 500)
+
+      child.once("close", () => {
+        clearTimeout(timer)
+        finish()
+      })
+
+      try {
+        child.kill("SIGKILL")
+      } catch {
+        clearTimeout(timer)
+        finish()
+      }
+    })
+
+    this.child = null
+    this.status = "stopped"
+  }
+
   async prompt(message: string): Promise<void> {
     await this.sendExpectSuccess({ type: "prompt", message })
   }
