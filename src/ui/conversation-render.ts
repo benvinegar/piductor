@@ -1,8 +1,20 @@
 export const DEFAULT_CONVERSATION = "_No conversation yet. Start an agent and send a prompt._"
 const MESSAGE_SPACER = "..."
+const MAX_RENDER_LINES = 300
 
 function stripTimestamp(line: string): string {
   return line.replace(/^\[\d{2}:\d{2}:\d{2}\]\s*/, "")
+}
+
+function findLastUserLineIndex(lines: string[]): number {
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    const line = stripTimestamp(lines[index] ?? "")
+    if (line.startsWith("[you/")) {
+      return index
+    }
+  }
+
+  return -1
 }
 
 export function formatUserMessageBox(content: string): string {
@@ -40,7 +52,13 @@ export function toConversationMarkdown(lines: string[]): string {
     pendingAssistant = []
   }
 
-  const recent = lines.slice(-300)
+  const startIndex = Math.max(0, lines.length - MAX_RENDER_LINES)
+  let recent = lines.slice(startIndex)
+  const lastUserIndex = findLastUserLineIndex(lines)
+  if (lastUserIndex !== -1 && lastUserIndex < startIndex) {
+    recent = [lines[lastUserIndex] ?? "", ...recent]
+  }
+
   for (const rawLine of recent) {
     const line = stripTimestamp(rawLine)
 

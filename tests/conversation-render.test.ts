@@ -41,6 +41,17 @@ describe("conversation-render", () => {
     expect(rendered).toContain("...")
   })
 
+  it("keeps the latest user prompt visible when assistant output exceeds the render window", () => {
+    const lines = ["[12:00:00] [you/prompt] keep this prompt visible"]
+    for (let index = 0; index < 340; index += 1) {
+      lines.push(`[12:01:${String(index % 60).padStart(2, "0")}] assistant line ${index}`)
+    }
+
+    const rendered = toConversationMarkdown(lines)
+    expect(rendered).toContain("keep this prompt visible")
+    expect(rendered).toContain("assistant line 339")
+  })
+
   it("preserves blank lines inside assistant messages", () => {
     const rendered = toConversationMarkdown([
       "[12:00:01] Line one",
