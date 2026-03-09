@@ -51,6 +51,7 @@ import { formatTestRunStatus, nextTestRunFinished, nextTestRunStarted, type Test
 import { evaluateWorkspaceReadiness, formatWorkspaceReadinessLabel } from "../workspace/readiness"
 import { diffFingerprintFromStats } from "../review/diff-fingerprint"
 import { LOADING_TOKEN, renderLoadingTokens } from "./loading"
+import { compactThinkingPreview } from "./thinking-preview"
 import { sanitizePiStderrLine, shouldSurfacePiStderr } from "../network/pi-stderr"
 import { parseAgentCommand, resolveRestartModel } from "../agent/control"
 import { killProcessByPid } from "../agent/process-kill"
@@ -307,6 +308,7 @@ export class PiConductorApp {
   private readonly runLogsByWorkspace = new Map<number, string[]>()
   private readonly assistantPartialByWorkspace = new Map<number, string>()
   private readonly thinkingPartialByWorkspace = new Map<number, string>()
+  private readonly lastThinkingPreviewByWorkspace = new Map<number, string>()
   private readonly runProcessesByWorkspace = new Map<number, Set<RunProcessEntry>>()
   private readonly runSequenceByWorkspace = new Map<number, number>()
   private readonly agentTurnsInFlight = new Set<number>()
@@ -429,8 +431,11 @@ export class PiConductorApp {
 
   private emitSnapshot() {
     const selectedWorkspaceId = this.selectedWorkspaceId
-    const thinkingRaw = selectedWorkspaceId ? this.thinkingPartialByWorkspace.get(selectedWorkspaceId) ?? "" : ""
-    const thinkingPreview = thinkingRaw.replace(/\s+/g, " ").trim()
+    const liveThinkingRaw = selectedWorkspaceId ? this.thinkingPartialByWorkspace.get(selectedWorkspaceId) ?? "" : ""
+    const persistedThinkingPreview = selectedWorkspaceId
+      ? this.lastThinkingPreviewByWorkspace.get(selectedWorkspaceId) ?? ""
+      : ""
+    const thinkingPreview = compactThinkingPreview(liveThinkingRaw || persistedThinkingPreview)
     const thinkingActive = selectedWorkspaceId ? this.agentTurnsInFlight.has(selectedWorkspaceId) : false
 
     this.snapshot = {
@@ -1358,6 +1363,8 @@ export class PiConductorApp {
       return
     }
 
+    this.flushThinkingPartial(workspace.id, false)
+
     const sendMode = this.getSendModeForWorkspace(workspace.id)
     let agent = this.agentByWorkspace.get(workspace.id)
 
@@ -1637,6 +1644,7 @@ export class PiConductorApp {
     switch (event.type) {
       case "process_error":
         this.agentTurnsInFlight.delete(workspaceId)
+        this.flushThinkingPartial(workspaceId)
         this.store.setAgentState({
           workspaceId,
           status: "error",
@@ -1669,11 +1677,13 @@ export class PiConductorApp {
 
       case "agent_start":
         this.agentTurnsInFlight.add(workspaceId)
+        this.flushThinkingPartial(workspaceId, false)
         this.appendWorkspaceLog(workspaceId, "[agent] started turn")
         break
 
       case "turn_start":
         this.agentTurnsInFlight.add(workspaceId)
+        this.flushThinkingPartial(workspaceId, false)
         break
 
       case "agent_end":
@@ -1762,11 +1772,23 @@ export class PiConductorApp {
   private appendThinkingStream(workspaceId: number, delta: string) {
     const current = this.thinkingPartialByWorkspace.get(workspaceId) ?? ""
     const combined = `${current}${delta}`
-    const clipped = combined.slice(-240)
+    const clipped = combined.slice(-640)
     this.thinkingPartialByWorkspace.set(workspaceId, clipped)
+    this.lastThinkingPreviewByWorkspace.set(workspaceId, compactThinkingPreview(clipped))
   }
 
-  private flushThinkingPartial(workspaceId: number) {
+  private flushThinkingPartial(workspaceId: number, persist = true) {
+    const partial = this.thinkingPartialByWorkspace.get(workspaceId) ?? ""
+
+    if (persist) {
+      const preview = compactThinkingPreview(partial)
+      if (preview.length > 0) {
+        this.lastThinkingPreviewByWorkspace.set(workspaceId, preview)
+      }
+    } else {
+      this.lastThinkingPreviewByWorkspace.delete(workspaceId)
+    }
+
     this.thinkingPartialByWorkspace.delete(workspaceId)
   }
 
@@ -2596,7 +2618,9 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
   const composerSpinner = hasLoadingToken ? renderLoadingTokens(LOADING_TOKEN, loadingFrameIndex) : ""
   const thinkingIndicatorText = snapshot.thinkingActive
     ? `${composerSpinner || "•"} Thinking${snapshot.thinkingPreview ? ` · ${snapshot.thinkingPreview}` : "…"}`
-    : ""
+    : snapshot.thinkingPreview
+      ? `Thinking · ${snapshot.thinkingPreview}`
+      : ""
   const centerMarkdown = snapshot.conversationMarkdown
 
   const statusRows = snapshot.statusText
@@ -3371,11 +3395,11 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                 width="100%"
               />
 
-              {snapshot.thinkingActive && (
+              {(snapshot.thinkingActive || snapshot.thinkingPreview.length > 0) && (
                 <text
                   id="pc-thinking-indicator"
                   content={thinkingIndicatorText}
-                  fg="#93c5fd"
+                  fg={snapshot.thinkingActive ? "#93c5fd" : "#64748b"}
                   wrapMode="word"
                   style={{
                     marginTop: 1,
