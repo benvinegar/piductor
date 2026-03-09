@@ -108,6 +108,26 @@ function formatSectionHeader(title: string, collapsed: boolean, width: number): 
   return `${prefix}${"─".repeat(filler)}`
 }
 
+function truncateWithEllipsis(value: string, maxChars: number): string {
+  if (maxChars <= 0) return ""
+  if (value.length <= maxChars) return value
+  if (maxChars === 1) return "…"
+  return `${value.slice(0, maxChars - 1).trimEnd()}…`
+}
+
+function formatCommandSuggestionLine(command: string, description: string, width: number): string {
+  const lhs = `/${command}`
+  const rhs = description
+  const minGap = 2
+  const free = width - lhs.length - rhs.length
+
+  if (free >= minGap) {
+    return `${lhs}${" ".repeat(free)}${rhs}`
+  }
+
+  return truncateWithEllipsis(`${lhs} — ${rhs}`, width)
+}
+
 function workspaceStatusColor(status: string): string {
   switch (status) {
     case "active":
@@ -2602,6 +2622,15 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
     centerTitle.length > maxTitleWidth ? `${centerTitle.slice(0, Math.max(0, maxTitleWidth - 1))}…` : centerTitle
   const fillerLen = Math.max(1, headerWidth - truncatedTitle.length - headerActions.length - 2)
   const conversationHeaderText = `${truncatedTitle} ${"─".repeat(fillerLen)} ${headerActions}`
+  const lobbyAsciiWidth = lobbyAscii.reduce((max, line) => Math.max(max, line.length), 0)
+  const centerOffset = leftVisible ? leftColumnWidth + 1 : 0
+  const rawLobbyLeftPadding = Math.max(0, Math.floor((terminalWidth - lobbyAsciiWidth) / 2) - centerOffset)
+  const lobbyLeftPadding = clamp(rawLobbyLeftPadding, 0, 48)
+  const lobbySubtitle = "Select a workspace to continue"
+  const rawLobbySubtitlePadding = Math.max(0, Math.floor((terminalWidth - lobbySubtitle.length) / 2) - centerOffset)
+  const lobbySubtitlePadding = clamp(rawLobbySubtitlePadding, 0, 56)
+  const lobbyAsciiLines = lobbyAscii.map((line) => `${" ".repeat(lobbyLeftPadding)}${line}`)
+  const lobbySubtitleLine = `${" ".repeat(lobbySubtitlePadding)}${lobbySubtitle}`
 
   const hasLoadingToken = snapshot.agentBusy
   useEffect(() => {
@@ -2636,6 +2665,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
     hasSlashCommandPrefix
   const selectedCommandSuggestion = commandSuggestions[commandSuggestionIndex] ?? commandSuggestions[0] ?? null
   const commandSuggestionHeight = commandAutocompleteVisible ? Math.min(commandSuggestions.length, 6) + 1 : 0
+  const commandSuggestionLineWidth = Math.max(32, centerColumnWidth - 12)
 
   const statusRows = snapshot.statusText
     .split("\n")
@@ -3389,12 +3419,11 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                 id="pc-lobby-center-content"
                 style={{
                   flexDirection: "column",
-                  alignItems: "center",
                   flexShrink: 0,
                   marginTop: lobbyTopPadding,
                 }}
               >
-                {lobbyAscii.map((line, index) => (
+                {lobbyAsciiLines.map((line, index) => (
                   <text
                     key={`pc-lobby-ascii-${index}`}
                     content={line}
@@ -3402,7 +3431,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                     wrapMode="none"
                   />
                 ))}
-                <text content="Select a workspace to continue" fg="#94a3b8" wrapMode="none" style={{ marginTop: 1 }} />
+                <text content={lobbySubtitleLine} fg="#94a3b8" wrapMode="none" style={{ marginTop: 1 }} />
               </box>
             </box>
           ) : (
@@ -3511,6 +3540,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
             {commandAutocompleteVisible && commandSuggestions.length > 0 && (
               <box
                 id="pc-command-autocomplete"
+                width="100%"
                 height={commandSuggestionHeight}
                 backgroundColor="#0b1220"
                 border
@@ -3525,9 +3555,11 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
               >
                 {commandSuggestions.slice(0, 6).map((entry, index) => {
                   const selected = index === commandSuggestionIndex
+                  const line = formatCommandSuggestionLine(entry.command, entry.description, commandSuggestionLineWidth)
                   return (
                     <box
                       key={`pc-cmd-suggestion-${entry.command}`}
+                      width="100%"
                       height={1}
                       backgroundColor={selected ? "#1e293b" : "transparent"}
                       onMouseDown={(event) => {
@@ -3540,16 +3572,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                         flexShrink: 0,
                       }}
                     >
-                      <text
-                        content={`/${entry.command}`}
-                        fg={selected ? "#e2e8f0" : "#93c5fd"}
-                        wrapMode="none"
-                        style={{
-                          flexGrow: 1,
-                          flexShrink: 1,
-                        }}
-                      />
-                      <text content={entry.description} fg="#64748b" wrapMode="none" selectable={false} />
+                      <text content={line} fg={selected ? "#e2e8f0" : "#93c5fd"} wrapMode="none" />
                     </box>
                   )
                 })}
