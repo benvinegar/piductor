@@ -63,6 +63,7 @@ bun run dev
 /run archive
 /run stop
 /run mode [concurrent|nonconcurrent]
+/test [command]
 /status
 /diff
 /ui left|right|toggle
@@ -107,7 +108,8 @@ Legacy `piconductor` config/data paths are still detected for backward compatibi
   "defaultModel": "anthropic/claude-sonnet-4-20250514",
   "scripts": {
     "setup": "bun install",
-    "run": "bun run test",
+    "run": "bun run dev",
+    "test": "bun run test",
     "archive": "echo archived",
     "runMode": "nonconcurrent"
   }

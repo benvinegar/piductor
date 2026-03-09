@@ -35,6 +35,7 @@ export interface AgentRecord {
 export interface ScriptConfig {
   setup?: string
   run?: string
+  test?: string
   archive?: string
   runMode?: "concurrent" | "nonconcurrent"
 }

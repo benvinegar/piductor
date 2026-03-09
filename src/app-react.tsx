@@ -45,6 +45,7 @@ import { buildWorkspaceScriptEnv } from "./script-env"
 import { shouldStopExistingRun, stopSignalSequence } from "./run-policy"
 import { normalizeRunMode, parseRunCommandArgs, runCommandUsage, type RunMode } from "./run-command"
 import { formatRunExitSummary, formatRunLogLine } from "./run-log"
+import { formatTestRunStatus, nextTestRunFinished, nextTestRunStarted, type TestRunState } from "./test-status"
 import { LOADING_TOKEN, renderLoadingTokens } from "./loading"
 import { sanitizePiStderrLine, shouldSurfacePiStderr } from "./pi-stderr"
 import { parseAgentCommand, resolveRestartModel } from "./agent-control"
@@ -270,6 +271,7 @@ export class PiConductorApp {
   private readonly agentTurnsInFlight = new Set<number>()
   private readonly expandedRepoIds = new Set<number>()
   private readonly lastActivityByWorkspace = new Map<number, string>()
+  private readonly lastTestRunByWorkspace = new Map<number, TestRunState>()
   private readonly uiFlushScheduler = new UiFlushScheduler(45, () => {
     this.refreshStatusPanel()
     this.refreshLogsPanel()
@@ -535,6 +537,7 @@ export class PiConductorApp {
         this.appendGlobalLog("  /mode <prompt|steer|follow_up>")
         this.appendGlobalLog("  /pr create [--dry-run]")
         this.appendGlobalLog("  /run [command]  (or config scripts.run)")
+        this.appendGlobalLog("  /test [command]  (or config scripts.test)")
         this.appendGlobalLog("  /run setup")
         this.appendGlobalLog("  /run archive")
         this.appendGlobalLog("  /run stop")
@@ -988,6 +991,38 @@ export class PiConductorApp {
         return
       }
 
+      case "test": {
+        const workspace = this.getSelectedWorkspace()
+        if (!workspace) {
+          this.appendGlobalLog("No workspace selected.")
+          return
+        }
+
+        const command = args.length > 0 ? args.join(" ") : this.config.scripts.test
+        if (!command) {
+          this.appendWorkspaceLog(workspace.id, "No test command specified. Set scripts.test or pass /test <command>.")
+          return
+        }
+
+        const startedAt = new Date().toISOString()
+        this.lastTestRunByWorkspace.set(workspace.id, nextTestRunStarted(startedAt))
+        this.appendWorkspaceLog(workspace.id, `[test] started at ${startedAt}`)
+        this.refreshStatusPanel()
+        this.emitSnapshot()
+
+        await this.startRunProcess(workspace.id, command, "test", false, {
+          onExit: (code, signal) => {
+            const finishedAt = new Date().toISOString()
+            const result = nextTestRunFinished(code, signal, finishedAt)
+            this.lastTestRunByWorkspace.set(workspace.id, result)
+            this.appendWorkspaceLog(workspace.id, `[test] ${formatTestRunStatus(result)} at ${finishedAt}`)
+            this.refreshStatusPanel()
+            this.emitSnapshot()
+          },
+        })
+        return
+      }
+
       case "ui": {
         const sub = (args[0] || "").toLowerCase()
         if (sub === "left") {
@@ -1294,7 +1329,13 @@ export class PiConductorApp {
     await this.startRunProcess(workspaceId, command, scriptType, true)
   }
 
-  private async startRunProcess(workspaceId: number, command: string, label: string, waitForExit: boolean) {
+  private async startRunProcess(
+    workspaceId: number,
+    command: string,
+    label: string,
+    waitForExit: boolean,
+    options?: { onExit?: (code: number | null, signal: NodeJS.Signals | null) => void },
+  ) {
     const workspace = this.store.getWorkspaceById(workspaceId)
     if (!workspace) {
       this.appendGlobalLog(`Workspace ${workspaceId} not found for ${label} script.`)
@@ -1369,6 +1410,7 @@ export class PiConductorApp {
         this.untrackRunProcess(workspaceId, runEntry)
         this.appendWorkspaceLog(workspaceId, `[${label}#${runId}] ${formatRunExitSummary(code, signal)}`)
         this.appendRunLog(workspaceId, formatRunLogLine(runId, "exit", formatRunExitSummary(code, signal)))
+        options?.onExit?.(code, signal)
         this.reloadWorkspaces(this.selectedWorkspaceId)
         this.refreshStatusPanel()
         this.refreshDiffPanel()
@@ -1923,6 +1965,8 @@ export class PiConductorApp {
     const runState = runCount > 0 ? `running (${runCount})` : "idle"
     const mergeState =
       changedCount > 0 && runState === "idle" ? "Ready to merge" : changedCount > 0 ? "Changes pending" : "No changes yet"
+    const testState = workspace ? this.lastTestRunByWorkspace.get(workspace.id) ?? null : null
+    const testStatus = formatTestRunStatus(testState)
 
     const agentStatus = agent?.status ?? "stopped"
     const turnInFlight = workspace ? this.agentTurnsInFlight.has(workspace.id) : false
@@ -1944,6 +1988,7 @@ export class PiConductorApp {
       `agent      ${agentStatusLabel}${agent?.pid ? ` (pid ${agent.pid})` : ""}`,
       `activity   ${activityTime}`,
       `run        ${runState} · mode=${this.runMode}`,
+      `tests      ${testStatus}`,
       `changes    ${changedCount} files · ${mergeState}`,
     ]
 
