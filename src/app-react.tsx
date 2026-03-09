@@ -49,6 +49,7 @@ import { formatRunExitSummary, formatRunLogLine } from "./run-log"
 import { parseFileDiff, type DiffViewMode } from "./diff-review"
 import { formatTestRunStatus, nextTestRunFinished, nextTestRunStarted, type TestRunState } from "./test-status"
 import { evaluateWorkspaceReadiness, formatWorkspaceReadinessLabel } from "./workspace-readiness"
+import { diffFingerprintFromStats } from "./diff-fingerprint"
 import { LOADING_TOKEN, renderLoadingTokens } from "./loading"
 import { sanitizePiStderrLine, shouldSurfacePiStderr } from "./pi-stderr"
 import { parseAgentCommand, resolveRestartModel } from "./agent-control"
@@ -116,14 +117,6 @@ function workspaceStatusColor(status: string): string {
     default:
       return "#94a3b8"
   }
-}
-
-function diffFingerprintFromStats(stats: Array<{ path: string; added: number | null; removed: number | null; status: string }>): string {
-  if (stats.length === 0) {
-    return ""
-  }
-
-  return stats.map((entry) => `${entry.status}:${entry.path}:${entry.added ?? "?"}:${entry.removed ?? "?"}`).join("|")
 }
 
 type DiffRow = {
