@@ -2568,10 +2568,14 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
     centerTitle.length > maxTitleWidth ? `${centerTitle.slice(0, Math.max(0, maxTitleWidth - 1))}…` : centerTitle
   const fillerLen = Math.max(1, headerWidth - truncatedTitle.length - headerActions.length - 2)
   const conversationHeaderText = `${truncatedTitle} ${"─".repeat(fillerLen)} ${headerActions}`
-  const lobbyTitle = "PIDUCTOR"
-  const lobbySubtitle = "Select a workspace to continue"
-  const lobbyTitleLine = `${" ".repeat(Math.max(0, Math.floor((centerColumnWidth - lobbyTitle.length) / 2)))}${lobbyTitle}`
-  const lobbySubtitleLine = `${" ".repeat(Math.max(0, Math.floor((centerColumnWidth - lobbySubtitle.length) / 2)))}${lobbySubtitle}`
+  const lobbyAscii = [
+    "██████╗ ██╗██████╗ ██╗   ██╗ ██████╗████████╗ ██████╗ ██████╗",
+    "██╔══██╗██║██╔══██╗██║   ██║██╔════╝╚══██╔══╝██╔═══██╗██╔══██╗",
+    "██████╔╝██║██║  ██║██║   ██║██║        ██║   ██║   ██║██████╔╝",
+    "██╔═══╝ ██║██║  ██║██║   ██║██║        ██║   ██║   ██║██╔══██╗",
+    "██║     ██║██████╔╝╚██████╔╝╚██████╗   ██║   ╚██████╔╝██║  ██║",
+    "╚═╝     ╚═╝╚═════╝  ╚═════╝  ╚═════╝   ╚═╝    ╚═════╝ ╚═╝  ╚═╝",
+  ]
 
   const hasLoadingToken = snapshot.agentBusy
   useEffect(() => {
@@ -3269,10 +3273,13 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
               style={{
                 flexDirection: "column",
                 justifyContent: "center",
+                alignItems: "center",
               }}
             >
-              <text content={lobbyTitleLine} fg="#dbeafe" wrapMode="none" />
-              <text content={lobbySubtitleLine} fg="#94a3b8" wrapMode="none" style={{ marginTop: 1 }} />
+              {lobbyAscii.map((line, index) => (
+                <text key={`pc-lobby-ascii-${index}`} content={line} fg={index < 2 ? "#93c5fd" : "#dbeafe"} wrapMode="none" />
+              ))}
+              <text content="Select a workspace to continue" fg="#94a3b8" wrapMode="none" style={{ marginTop: 1 }} />
             </box>
           ) : (
             <>
