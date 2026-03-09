@@ -43,6 +43,7 @@ import { parseWorkspaceNewArgs, workspaceNewUsage } from "./workspace-new"
 import { extractFirstUrl, parsePrCreateArgs, prCreateUsage } from "./pr-command"
 import { buildWorkspaceScriptEnv } from "./script-env"
 import { shouldStopExistingRun, stopSignalSequence } from "./run-policy"
+import { normalizeRunMode, parseRunCommandArgs, runCommandUsage, type RunMode } from "./run-command"
 import { LOADING_TOKEN, renderLoadingTokens } from "./loading"
 import { sanitizePiStderrLine, shouldSurfacePiStderr } from "./pi-stderr"
 import { parseAgentCommand, resolveRestartModel } from "./agent-control"
@@ -235,6 +236,7 @@ export class PiConductorApp {
   private readonly root: Root
   private readonly config: AppConfig
   private readonly store: Store
+  private runMode: RunMode
 
   private repos: RepoRecord[] = []
   private workspaces: WorkspaceRecord[] = []
@@ -255,7 +257,7 @@ export class PiConductorApp {
   private readonly runLogsByWorkspace = new Map<number, string[]>()
   private readonly assistantPartialByWorkspace = new Map<number, string>()
   private readonly thinkingPartialByWorkspace = new Map<number, string>()
-  private readonly runProcessByWorkspace = new Map<number, ChildProcessWithoutNullStreams>()
+  private readonly runProcessesByWorkspace = new Map<number, Set<ChildProcessWithoutNullStreams>>()
   private readonly agentTurnsInFlight = new Set<number>()
   private readonly expandedRepoIds = new Set<number>()
   private readonly lastActivityByWorkspace = new Map<number, string>()
@@ -316,6 +318,7 @@ export class PiConductorApp {
     this.root = root
     this.config = config
     this.store = store
+    this.runMode = normalizeRunMode(config.scripts.runMode)
   }
 
   static async create(config: AppConfig, store: Store): Promise<PiConductorApp> {
@@ -523,7 +526,10 @@ export class PiConductorApp {
         this.appendGlobalLog("  /mode <prompt|steer|follow_up>")
         this.appendGlobalLog("  /pr create [--dry-run]")
         this.appendGlobalLog("  /run [command]  (or config scripts.run)")
+        this.appendGlobalLog("  /run setup")
+        this.appendGlobalLog("  /run archive")
         this.appendGlobalLog("  /run stop")
+        this.appendGlobalLog("  /run mode [concurrent|nonconcurrent]")
         this.appendGlobalLog("  /status")
         this.appendGlobalLog("  /diff")
         this.appendGlobalLog("  /ui left|right|toggle")
@@ -643,8 +649,7 @@ export class PiConductorApp {
           )
 
           if (this.config.scripts.setup) {
-            this.appendWorkspaceLog(workspace.id, `Running setup script: ${this.config.scripts.setup}`)
-            void this.startRunProcess(workspace.id, this.config.scripts.setup, "setup", true)
+            void this.runConfiguredScript(workspace.id, "setup")
           }
 
           return
@@ -695,8 +700,7 @@ export class PiConductorApp {
           await this.stopAgent(workspace.id, { force: false, reason: "archive" })
 
           if (this.config.scripts.archive) {
-            this.appendWorkspaceLog(workspace.id, `Running archive script: ${this.config.scripts.archive}`)
-            await this.startRunProcess(workspace.id, this.config.scripts.archive, "archive", true)
+            await this.runConfiguredScript(workspace.id, "archive")
           }
 
           removeWorktree({ repoRoot: repo.rootPath, worktreePath: workspace.worktreePath, force: true })
@@ -921,9 +925,15 @@ export class PiConductorApp {
           return
         }
 
-        if (args[0] === "stop") {
-          const running = this.runProcessByWorkspace.get(workspace.id)
-          if (!running) {
+        const parsed = parseRunCommandArgs(args)
+        if (!parsed) {
+          this.appendGlobalLog(runCommandUsage())
+          return
+        }
+
+        if (parsed.action === "stop") {
+          const runningCount = this.runProcessCount(workspace.id)
+          if (runningCount === 0) {
             this.appendWorkspaceLog(workspace.id, "No run process to stop.")
             this.appendRunLog(workspace.id, "No run process to stop.")
             this.refreshTerminalPanel()
@@ -936,7 +946,30 @@ export class PiConductorApp {
           return
         }
 
-        const command = args.length > 0 ? args.join(" ") : this.config.scripts.run
+        if (parsed.action === "mode-get") {
+          this.appendWorkspaceLog(workspace.id, `Run mode: ${this.runMode}`)
+          this.appendGlobalLog(`Run mode (${workspace.name}): ${this.runMode}`)
+          return
+        }
+
+        if (parsed.action === "mode-set") {
+          this.runMode = parsed.mode
+          this.appendWorkspaceLog(workspace.id, `Run mode set to ${this.runMode}`)
+          this.appendGlobalLog(`Run mode updated to ${this.runMode}`)
+          return
+        }
+
+        if (parsed.action === "setup") {
+          await this.runConfiguredScript(workspace.id, "setup")
+          return
+        }
+
+        if (parsed.action === "archive") {
+          await this.runConfiguredScript(workspace.id, "archive")
+          return
+        }
+
+        const command = parsed.command ?? this.config.scripts.run
         if (!command) {
           this.appendWorkspaceLog(workspace.id, "No run command specified. Set scripts.run or pass /run <command>.")
           return
@@ -1015,19 +1048,46 @@ export class PiConductorApp {
     }
   }
 
-  private async stopRunProcess(workspaceId: number, reason: string) {
-    const running = this.runProcessByWorkspace.get(workspaceId)
-    if (!running) return
+  private runProcessCount(workspaceId: number): number {
+    return this.runProcessesByWorkspace.get(workspaceId)?.size ?? 0
+  }
 
-    this.appendRunLog(workspaceId, `[run] stopping (${reason}) ...`)
+  private trackRunProcess(workspaceId: number, child: ChildProcessWithoutNullStreams) {
+    const running = this.runProcessesByWorkspace.get(workspaceId) ?? new Set<ChildProcessWithoutNullStreams>()
+    running.add(child)
+    this.runProcessesByWorkspace.set(workspaceId, running)
+  }
+
+  private untrackRunProcess(workspaceId: number, child: ChildProcessWithoutNullStreams) {
+    const running = this.runProcessesByWorkspace.get(workspaceId)
+    if (!running) {
+      return
+    }
+
+    running.delete(child)
+    if (running.size === 0) {
+      this.runProcessesByWorkspace.delete(workspaceId)
+    }
+  }
+
+  private async stopRunProcess(workspaceId: number, reason: string) {
+    const running = [...(this.runProcessesByWorkspace.get(workspaceId) ?? [])]
+    if (running.length === 0) return
+
+    this.appendRunLog(workspaceId, `[run] stopping ${running.length} process(es) (${reason}) ...`)
 
     const [gracefulSignal, forceSignal] = stopSignalSequence()
-    this.signalRunProcess(running, gracefulSignal)
+    for (const child of running) {
+      this.signalRunProcess(child, gracefulSignal)
+    }
     await sleep(220)
 
-    if (this.runProcessByWorkspace.get(workspaceId) === running) {
-      this.signalRunProcess(running, forceSignal)
-      this.appendRunLog(workspaceId, `[run] escalated to ${forceSignal}`)
+    const remaining = [...(this.runProcessesByWorkspace.get(workspaceId) ?? [])]
+    if (remaining.length > 0) {
+      for (const child of remaining) {
+        this.signalRunProcess(child, forceSignal)
+      }
+      this.appendRunLog(workspaceId, `[run] escalated ${remaining.length} process(es) to ${forceSignal}`)
     }
 
     this.refreshTerminalPanel()
@@ -1209,6 +1269,17 @@ export class PiConductorApp {
     this.emitSnapshot()
   }
 
+  private async runConfiguredScript(workspaceId: number, scriptType: "setup" | "archive") {
+    const command = scriptType === "setup" ? this.config.scripts.setup : this.config.scripts.archive
+    if (!command) {
+      this.appendWorkspaceLog(workspaceId, `No ${scriptType} script configured. Set scripts.${scriptType} in piductor.json.`)
+      return
+    }
+
+    this.appendWorkspaceLog(workspaceId, `Running ${scriptType} script: ${command}`)
+    await this.startRunProcess(workspaceId, command, scriptType, true)
+  }
+
   private async startRunProcess(workspaceId: number, command: string, label: string, waitForExit: boolean) {
     const workspace = this.store.getWorkspaceById(workspaceId)
     if (!workspace) {
@@ -1222,7 +1293,8 @@ export class PiConductorApp {
       return
     }
 
-    if (shouldStopExistingRun(this.config.scripts.runMode, this.runProcessByWorkspace.has(workspaceId))) {
+    if (shouldStopExistingRun(this.runMode, this.runProcessCount(workspaceId) > 0)) {
+      this.appendRunLog(workspaceId, `[run] replacing existing process (mode=${this.runMode})`)
       await this.stopRunProcess(workspaceId, "nonconcurrent mode")
     }
 
@@ -1244,8 +1316,9 @@ export class PiConductorApp {
     child.stdout.setEncoding("utf8")
     child.stderr.setEncoding("utf8")
 
-    this.runProcessByWorkspace.set(workspaceId, child)
-    this.appendWorkspaceLog(workspaceId, `[${label}] started`)
+    this.trackRunProcess(workspaceId, child)
+    this.appendWorkspaceLog(workspaceId, `[${label}] started (mode=${this.runMode})`)
+    this.appendRunLog(workspaceId, `[${label}] mode=${this.runMode} active=${this.runProcessCount(workspaceId)}`)
     this.appendRunLog(workspaceId, `$ ${command}`)
     this.refreshTerminalPanel()
     this.refreshStatusPanel()
@@ -1276,9 +1349,7 @@ export class PiConductorApp {
 
     const exitPromise = new Promise<void>((resolve) => {
       child.once("close", (code, signal) => {
-        if (this.runProcessByWorkspace.get(workspaceId) === child) {
-          this.runProcessByWorkspace.delete(workspaceId)
-        }
+        this.untrackRunProcess(workspaceId, child)
         this.appendWorkspaceLog(
           workspaceId,
           `[${label}] exited code=${code ?? "null"} signal=${signal ?? "none"}`,
@@ -1834,7 +1905,8 @@ export class PiConductorApp {
       }
     }
 
-    const runState = workspace && this.runProcessByWorkspace.has(workspace.id) ? "running" : "idle"
+    const runCount = workspace ? this.runProcessCount(workspace.id) : 0
+    const runState = runCount > 0 ? `running (${runCount})` : "idle"
     const mergeState =
       changedCount > 0 && runState === "idle" ? "Ready to merge" : changedCount > 0 ? "Changes pending" : "No changes yet"
 
@@ -1857,7 +1929,7 @@ export class PiConductorApp {
       `branch     ${workspace?.branch ?? "<none>"}`,
       `agent      ${agentStatusLabel}${agent?.pid ? ` (pid ${agent.pid})` : ""}`,
       `activity   ${activityTime}`,
-      `run        ${runState}`,
+      `run        ${runState} · mode=${this.runMode}`,
       `changes    ${changedCount} files · ${mergeState}`,
     ]
 
@@ -1930,7 +2002,7 @@ export class PiConductorApp {
     this.refreshLogsPanel()
     this.emitSnapshot()
 
-    for (const [workspaceId] of this.runProcessByWorkspace.entries()) {
+    for (const workspaceId of [...this.runProcessesByWorkspace.keys()]) {
       await this.stopRunProcess(workspaceId, "app shutdown")
     }
 

@@ -59,7 +59,10 @@ bun run dev
 /mode <prompt|steer|follow_up>
 /pr create [--dry-run]
 /run [command]
+/run setup
+/run archive
 /run stop
+/run mode [concurrent|nonconcurrent]
 /status
 /diff
 /ui left|right|toggle
