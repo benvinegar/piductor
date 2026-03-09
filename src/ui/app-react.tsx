@@ -77,11 +77,11 @@ import { buildHelpMarkdown, findCommandSuggestions } from "./commands"
 import {
   DEFAULT_THEME_KEY,
   getThemeByKey,
+  listThemes,
   nextThemeKey,
   parseThemeArgs,
   resolveThemeKey,
   themeUsage,
-  toThemeMarkdown,
   type ThemeKey,
   type UiThemeDefinition,
 } from "./themes"
@@ -221,6 +221,8 @@ export interface AppSnapshot {
   commandModalVisible: boolean
   commandModalTitle: string
   commandModalMarkdown: string
+  themeModalVisible: boolean
+  themeModalSelectedIndex: number
   diffModalVisible: boolean
   diffViewMode: DiffViewMode
   diffReviewTitle: string
@@ -414,6 +416,8 @@ export class PiConductorApp {
   private commandModalVisible = false
   private commandModalTitle = ""
   private commandModalMarkdown = ""
+  private themeModalVisible = false
+  private themeModalSelectedIndex = 0
   private diffViewMode: DiffViewMode = "unified"
   private diffReviewTitle = "Review branch changes"
   private diffReviewDiff = ""
@@ -459,6 +463,8 @@ export class PiConductorApp {
     commandModalVisible: this.commandModalVisible,
     commandModalTitle: this.commandModalTitle,
     commandModalMarkdown: this.commandModalMarkdown,
+    themeModalVisible: this.themeModalVisible,
+    themeModalSelectedIndex: this.themeModalSelectedIndex,
     diffModalVisible: this.diffModalVisible,
     diffViewMode: this.diffViewMode,
     diffReviewTitle: this.diffReviewTitle,
@@ -556,6 +562,8 @@ export class PiConductorApp {
       commandModalVisible: this.commandModalVisible,
       commandModalTitle: this.commandModalTitle,
       commandModalMarkdown: this.commandModalMarkdown,
+      themeModalVisible: this.themeModalVisible,
+      themeModalSelectedIndex: this.themeModalSelectedIndex,
       diffModalVisible: this.diffModalVisible,
       diffViewMode: this.diffViewMode,
       diffReviewTitle: this.diffReviewTitle,
@@ -1357,6 +1365,11 @@ export class PiConductorApp {
       }
 
       case "theme": {
+        if (args.length === 0) {
+          this.openThemeModal()
+          return
+        }
+
         const parsed = parseThemeArgs(args)
         if (!parsed) {
           this.appendGlobalLog(themeUsage())
@@ -1370,7 +1383,7 @@ export class PiConductorApp {
         }
 
         if (parsed.action === "list") {
-          this.openCommandModal("Themes", toThemeMarkdown(this.themeKey))
+          this.openThemeModal()
           return
         }
 
@@ -2785,6 +2798,60 @@ export class PiConductorApp {
     this.emitSnapshot()
   }
 
+  public openThemeModal() {
+    const themes = listThemes()
+    const selected = themes.findIndex((theme) => theme.key === this.themeKey)
+    this.themeModalSelectedIndex = selected >= 0 ? selected : 0
+    this.themeModalVisible = true
+    this.emitSnapshot()
+  }
+
+  public closeThemeModal() {
+    if (!this.themeModalVisible) return
+    this.themeModalVisible = false
+    this.emitSnapshot()
+  }
+
+  public moveThemeModalSelection(delta: number) {
+    if (!this.themeModalVisible) return
+    const themes = listThemes()
+    if (themes.length === 0) return
+
+    const total = themes.length
+    const current = Math.max(0, Math.min(this.themeModalSelectedIndex, total - 1))
+    this.themeModalSelectedIndex = (current + delta + total) % total
+    this.emitSnapshot()
+  }
+
+  public applyThemeModalSelection() {
+    if (!this.themeModalVisible) return
+    const themes = listThemes()
+    const selected = themes[this.themeModalSelectedIndex]
+    if (!selected) return
+
+    this.setTheme(selected.key)
+    this.themeModalVisible = false
+    this.emitSnapshot()
+  }
+
+  public setThemeModalSelection(index: number, applyImmediately = false) {
+    const themes = listThemes()
+    if (themes.length === 0) return
+
+    const clamped = Math.max(0, Math.min(index, themes.length - 1))
+    this.themeModalSelectedIndex = clamped
+
+    if (applyImmediately) {
+      const selected = themes[clamped]
+      if (selected) {
+        this.setTheme(selected.key)
+      }
+      this.themeModalVisible = false
+    }
+
+    this.emitSnapshot()
+  }
+
   public openDiffReview() {
     const workspace = this.getSelectedWorkspace()
     if (!workspace) return
@@ -3432,6 +3499,8 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
   )
   const commandModalWidth = clamp(Math.floor(terminalWidth * 0.76), 64, Math.max(64, terminalWidth - 6))
   const commandModalHeight = clamp(Math.floor(terminalHeight * 0.72), 14, Math.max(14, terminalHeight - 4))
+  const themeModalWidth = clamp(Math.floor(terminalWidth * 0.52), 54, Math.max(54, terminalWidth - 8))
+  const themeModalHeight = clamp(Math.floor(terminalHeight * 0.58), 12, Math.max(12, terminalHeight - 6))
   const diffModalWidth = clamp(Math.floor(terminalWidth * 0.9), 72, Math.max(72, terminalWidth - 4))
   const diffModalHeight = clamp(Math.floor(terminalHeight * 0.85), 16, Math.max(16, terminalHeight - 3))
   const headerActions = "/help · /mode · /theme · /ui"
@@ -3473,10 +3542,12 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
   const hasSlashCommandPrefix = composerFirstLine.trimStart().startsWith("/")
   const commandQuery = hasSlashCommandPrefix ? composerFirstLine.trimStart().slice(1) : ""
   const commandSuggestions = findCommandSuggestions(commandQuery)
+  const themeOptions = listThemes()
   const commandAutocompleteVisible =
     focusTarget === "input" &&
     !workspaceSelectionMode &&
     !createWorkspaceModalVisible &&
+    !snapshot.themeModalVisible &&
     !snapshot.commandModalVisible &&
     hasSlashCommandPrefix
   const selectedCommandSuggestion = commandSuggestions[commandSuggestionIndex] ?? commandSuggestions[0] ?? null
@@ -3707,6 +3778,34 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
     }
 
     if (createWorkspaceModalVisible) {
+      return
+    }
+
+    if (snapshot.themeModalVisible && key.name === "escape") {
+      key.preventDefault()
+      app.closeThemeModal()
+      return
+    }
+
+    if (snapshot.themeModalVisible) {
+      if (key.name === "up") {
+        key.preventDefault()
+        app.moveThemeModalSelection(-1)
+        return
+      }
+
+      if (key.name === "down") {
+        key.preventDefault()
+        app.moveThemeModalSelection(1)
+        return
+      }
+
+      if (key.name === "return" || key.name === "linefeed") {
+        key.preventDefault()
+        app.applyThemeModalSelection()
+        return
+      }
+
       return
     }
 
@@ -4928,6 +5027,102 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                 selectable={false}
               />
             </box>
+          </box>
+        </box>
+      )}
+
+      {snapshot.themeModalVisible && (
+        <box
+          id="pc-theme-modal-backdrop"
+          position="absolute"
+          left={0}
+          top={0}
+          width="100%"
+          height="100%"
+          backgroundColor={colors.modalOverlayBackground}
+          onMouseDown={(event) => {
+            event.preventDefault()
+            app.closeThemeModal()
+          }}
+          style={{
+            zIndex: 93,
+          }}
+        >
+          <box
+            id="pc-theme-modal"
+            position="absolute"
+            left="50%"
+            top="50%"
+            width={themeModalWidth}
+            height={themeModalHeight}
+            marginLeft={-Math.floor(themeModalWidth / 2)}
+            marginTop={-Math.floor(themeModalHeight / 2)}
+            border
+            borderStyle="double"
+            borderColor={colors.modalBorder}
+            backgroundColor={colors.modalBackground}
+            title={`Theme · ${theme.name}`}
+            titleAlignment="center"
+            onMouseDown={(event) => {
+              event.preventDefault()
+            }}
+            style={{
+              flexDirection: "column",
+              paddingLeft: 1,
+              paddingRight: 1,
+              paddingTop: 1,
+              paddingBottom: 1,
+            }}
+          >
+            <text
+              content="Use ↑/↓ to select, Enter to apply, Esc to close"
+              fg={colors.textMuted}
+              wrapMode="none"
+              style={{
+                flexShrink: 0,
+              }}
+            />
+
+            <scrollbox
+              id="pc-theme-modal-scroll"
+              border={false}
+              scrollY
+              scrollX={false}
+              shouldFill
+              style={{
+                flexGrow: 1,
+                marginTop: 1,
+              }}
+            >
+              {themeOptions.map((option, index) => {
+                const selected = index === snapshot.themeModalSelectedIndex
+                const active = option.key === snapshot.themeKey
+                const label = `${selected ? "›" : " "} ${option.name} (${option.key})${active ? " · current" : ""}`
+
+                return (
+                  <box
+                    key={`pc-theme-option-${option.key}`}
+                    width="100%"
+                    height={2}
+                    backgroundColor={selected ? colors.selectedBackground : "transparent"}
+                    onMouseDown={(event) => {
+                      event.preventDefault()
+                      app.setThemeModalSelection(index, true)
+                    }}
+                    style={{
+                      flexDirection: "column",
+                      flexShrink: 0,
+                      marginBottom: index === themeOptions.length - 1 ? 0 : 1,
+                    }}
+                  >
+                    <text content={label} fg={selected ? colors.selectedText : colors.textPrimary} wrapMode="none" />
+                    <text content={`  ${option.description}`} fg={colors.textMuted} wrapMode="none" />
+                  </box>
+                )
+              })}
+            </scrollbox>
+
+            <text content="Enter applies selected theme" fg={colors.textSubtle} wrapMode="none" selectable={false} />
           </box>
         </box>
       )}
