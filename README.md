@@ -65,6 +65,12 @@ bun run dev
 /run mode [concurrent|nonconcurrent]
 /test [command]
 /status
+/checklist [show]
+/checklist add <label>
+/checklist done <key|label>
+/checklist undone <key|label>
+/checklist remove <key|label>
+/checklist clear
 /diff [open|close|next|prev|mode [unified|split]|refresh]
 /ui left|right|toggle
 ```
@@ -75,7 +81,7 @@ Plain text input sends a message to the selected workspace agent using the curre
 
 Type `/` in the composer to open command autocomplete (mouse-select or `Tab` to apply a suggestion).
 
-`/pr create` requires GitHub CLI auth (`gh auth login`).
+`/pr create` requires GitHub CLI auth (`gh auth login`) and is blocked if required merge checklist items are incomplete.
 
 ## Keyboard + mouse controls
 

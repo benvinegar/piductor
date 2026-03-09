@@ -2,7 +2,13 @@ import { mkdirSync } from "node:fs"
 import path from "node:path"
 import { Database } from "bun:sqlite"
 import { nextAgentTimingState } from "../agent/state"
-import type { AgentRecord, AgentRuntimeStatus, RepoRecord, WorkspaceRecord } from "./types"
+import type {
+  AgentRecord,
+  AgentRuntimeStatus,
+  MergeChecklistItemRecord,
+  RepoRecord,
+  WorkspaceRecord,
+} from "./types"
 
 function nowIso() {
   return new Date().toISOString()
@@ -41,6 +47,18 @@ function mapAgent(row: any): AgentRecord {
     stoppedAt: row.stopped_at ? String(row.stopped_at) : null,
     lastEventAt: row.last_event_at ? String(row.last_event_at) : null,
     lastError: row.last_error ? String(row.last_error) : null,
+  }
+}
+
+function mapMergeChecklistItem(row: any): MergeChecklistItemRecord {
+  return {
+    workspaceId: Number(row.workspace_id),
+    itemKey: String(row.item_key),
+    label: String(row.label),
+    required: Number(row.required) === 1,
+    completed: Number(row.completed) === 1,
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at),
   }
 }
 
@@ -87,6 +105,18 @@ export class Store {
         stopped_at TEXT,
         last_event_at TEXT,
         last_error TEXT,
+        FOREIGN KEY(workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
+      );
+
+      CREATE TABLE IF NOT EXISTS merge_checklist_items (
+        workspace_id INTEGER NOT NULL,
+        item_key TEXT NOT NULL,
+        label TEXT NOT NULL,
+        required INTEGER NOT NULL DEFAULT 1,
+        completed INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY(workspace_id, item_key),
         FOREIGN KEY(workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
       );
     `)
@@ -311,5 +341,82 @@ export class Store {
         timing.lastEventAt,
         params.lastError ?? null,
       )
+  }
+
+  listMergeChecklistItems(workspaceId: number): MergeChecklistItemRecord[] {
+    const rows = this.db
+      .query(`
+        SELECT workspace_id, item_key, label, required, completed, created_at, updated_at
+        FROM merge_checklist_items
+        WHERE workspace_id = ?
+        ORDER BY created_at ASC, item_key ASC
+      `)
+      .all(workspaceId)
+
+    return rows.map(mapMergeChecklistItem)
+  }
+
+  upsertMergeChecklistItem(params: {
+    workspaceId: number
+    itemKey: string
+    label: string
+    required?: boolean
+    completed?: boolean
+  }): MergeChecklistItemRecord {
+    const now = nowIso()
+    this.db
+      .query(`
+        INSERT INTO merge_checklist_items(workspace_id, item_key, label, required, completed, created_at, updated_at)
+        VALUES(?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(workspace_id, item_key) DO UPDATE SET
+          label = excluded.label,
+          required = excluded.required,
+          completed = excluded.completed,
+          updated_at = excluded.updated_at
+      `)
+      .run(
+        params.workspaceId,
+        params.itemKey,
+        params.label,
+        params.required === false ? 0 : 1,
+        params.completed ? 1 : 0,
+        now,
+        now,
+      )
+
+    const item = this.listMergeChecklistItems(params.workspaceId).find((entry) => entry.itemKey === params.itemKey)
+    if (!item) {
+      throw new Error(`Failed to upsert merge checklist item ${params.itemKey}`)
+    }
+
+    return item
+  }
+
+  setMergeChecklistItemCompleted(workspaceId: number, itemKey: string, completed: boolean) {
+    this.db
+      .query(`
+        UPDATE merge_checklist_items
+        SET completed = ?, updated_at = ?
+        WHERE workspace_id = ? AND item_key = ?
+      `)
+      .run(completed ? 1 : 0, nowIso(), workspaceId, itemKey)
+  }
+
+  deleteMergeChecklistItem(workspaceId: number, itemKey: string) {
+    this.db
+      .query(`
+        DELETE FROM merge_checklist_items
+        WHERE workspace_id = ? AND item_key = ?
+      `)
+      .run(workspaceId, itemKey)
+  }
+
+  clearMergeChecklistItems(workspaceId: number) {
+    this.db
+      .query(`
+        DELETE FROM merge_checklist_items
+        WHERE workspace_id = ?
+      `)
+      .run(workspaceId)
   }
 }

@@ -32,6 +32,16 @@ export interface AgentRecord {
   lastError: string | null
 }
 
+export interface MergeChecklistItemRecord {
+  workspaceId: number
+  itemKey: string
+  label: string
+  required: boolean
+  completed: boolean
+  createdAt: string
+  updatedAt: string
+}
+
 export interface ScriptConfig {
   setup?: string
   run?: string

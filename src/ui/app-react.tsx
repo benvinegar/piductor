@@ -49,6 +49,13 @@ import { formatRunExitSummary, formatRunLogLine } from "../run/log"
 import { parseFileDiff, type DiffViewMode } from "../review/diff-review"
 import { formatTestRunStatus, nextTestRunFinished, nextTestRunStarted, type TestRunState } from "../run/test-status"
 import { evaluateWorkspaceReadiness, formatWorkspaceReadinessLabel } from "../workspace/readiness"
+import {
+  createChecklistItemKey,
+  evaluateMergeChecklist,
+  findChecklistItemByNeedle,
+  mergeChecklistSummaryLabel,
+  toMergeChecklistMarkdown,
+} from "../workspace/merge-checklist"
 import { diffFingerprintFromStats } from "../review/diff-fingerprint"
 import { LOADING_TOKEN, renderLoadingTokens } from "./loading"
 import { buildHelpMarkdown, findCommandSuggestions } from "./commands"
@@ -1025,6 +1032,22 @@ export class PiConductorApp {
           return
         }
 
+        if (!parsed.dryRun) {
+          this.refreshDiffPanel()
+          const mergeChecklist = this.evaluateWorkspaceMergeChecklist(workspace).evaluation
+          if (mergeChecklist.blocked) {
+            this.appendWorkspaceLog(
+              workspace.id,
+              `[pr] blocked by merge checklist (${mergeChecklist.pendingRequired.length} pending):`,
+            )
+            for (const item of mergeChecklist.pendingRequired) {
+              this.appendWorkspaceLog(workspace.id, `  - [ ] ${item.label} (${item.key})`)
+            }
+            this.openWorkspaceChecklistModal(workspace)
+            return
+          }
+        }
+
         const auth = this.runCommand("gh", ["auth", "status"], workspace.worktreePath)
         if (auth.status !== 0) {
           this.appendWorkspaceLog(workspace.id, "GitHub auth unavailable. Run `gh auth login` first.")
@@ -1203,6 +1226,81 @@ export class PiConductorApp {
       case "status": {
         this.appendGlobalLog("Status refreshed.")
         this.refreshStatusPanel()
+        return
+      }
+
+      case "checklist": {
+        const workspace = this.getSelectedWorkspace()
+        if (!workspace) {
+          this.appendGlobalLog("No workspace selected.")
+          return
+        }
+
+        const sub = (args[0] || "show").toLowerCase()
+
+        if (!sub || sub === "show") {
+          this.openWorkspaceChecklistModal(workspace)
+          return
+        }
+
+        if (sub === "add") {
+          const label = args.slice(1).join(" ").trim()
+          if (!label) {
+            this.appendGlobalLog("Usage: /checklist add <label>")
+            return
+          }
+
+          const existingKeys = this.store.listMergeChecklistItems(workspace.id).map((item) => item.itemKey)
+          const key = createChecklistItemKey(label, existingKeys)
+          this.store.upsertMergeChecklistItem({
+            workspaceId: workspace.id,
+            itemKey: key,
+            label,
+            required: true,
+            completed: false,
+          })
+          this.appendWorkspaceLog(workspace.id, `[checklist] added: ${label} (key=${key})`)
+          this.refreshStatusPanel()
+          return
+        }
+
+        if (sub === "done" || sub === "undone" || sub === "remove") {
+          const needle = args.slice(1).join(" ").trim()
+          if (!needle) {
+            this.appendGlobalLog(`Usage: /checklist ${sub} <key|label>`)
+            return
+          }
+
+          const found = this.findManualChecklistItem(workspace.id, needle)
+          if (!found) {
+            this.appendWorkspaceLog(workspace.id, `[checklist] item not found: ${needle}`)
+            return
+          }
+
+          if (sub === "remove") {
+            this.store.deleteMergeChecklistItem(workspace.id, found.itemKey)
+            this.appendWorkspaceLog(workspace.id, `[checklist] removed: ${found.label} (key=${found.itemKey})`)
+          } else {
+            const completed = sub === "done"
+            this.store.setMergeChecklistItemCompleted(workspace.id, found.itemKey, completed)
+            this.appendWorkspaceLog(
+              workspace.id,
+              `[checklist] ${completed ? "done" : "undone"}: ${found.label} (key=${found.itemKey})`,
+            )
+          }
+
+          this.refreshStatusPanel()
+          return
+        }
+
+        if (sub === "clear") {
+          this.store.clearMergeChecklistItems(workspace.id)
+          this.appendWorkspaceLog(workspace.id, "[checklist] cleared all manual items.")
+          this.refreshStatusPanel()
+          return
+        }
+
+        this.appendGlobalLog("Usage: /checklist [show|add|done|undone|remove|clear] ...")
         return
       }
 
@@ -2256,6 +2354,62 @@ export class PiConductorApp {
     this.emitSnapshot()
   }
 
+  private evaluateWorkspaceMergeChecklist(workspace: WorkspaceRecord) {
+    let changedCount = 0
+    try {
+      changedCount = getChangedFiles(workspace.worktreePath).length
+    } catch {
+      changedCount = 0
+    }
+
+    const runCount = this.runProcessCount(workspace.id)
+    const testState = this.lastTestRunByWorkspace.get(workspace.id) ?? null
+    const diffFingerprint = this.diffFingerprintByWorkspace.get(workspace.id) ?? ""
+    const reviewedDiffFingerprint = this.reviewedDiffFingerprintByWorkspace.get(workspace.id) ?? null
+    const turnInFlight = this.agentTurnsInFlight.has(workspace.id)
+    const manualItems = this.store.listMergeChecklistItems(workspace.id)
+
+    const evaluation = evaluateMergeChecklist({
+      runCount,
+      changedCount,
+      testState,
+      diffFingerprint,
+      reviewedDiffFingerprint,
+      turnInFlight,
+      manualItems,
+    })
+
+    return {
+      evaluation,
+      changedCount,
+      runCount,
+      testState,
+      diffFingerprint,
+      reviewedDiffFingerprint,
+      turnInFlight,
+    }
+  }
+
+  private openWorkspaceChecklistModal(workspace: WorkspaceRecord) {
+    const { evaluation } = this.evaluateWorkspaceMergeChecklist(workspace)
+    const markdown = toMergeChecklistMarkdown(workspace.name, evaluation)
+    this.openCommandModal("Merge checklist", markdown)
+  }
+
+  private findManualChecklistItem(workspaceId: number, needle: string) {
+    const records = this.store.listMergeChecklistItems(workspaceId)
+    const items = records.map((item) => ({
+      key: item.itemKey,
+      label: item.label,
+      required: item.required,
+      completed: item.completed,
+      source: "manual" as const,
+    }))
+
+    const match = findChecklistItemByNeedle(items, needle)
+    return match ? records.find((entry) => entry.itemKey === match.key) ?? null : null
+  }
+
   private appendGlobalLog(message: string) {
     this.appendLog(GLOBAL_LOG_STREAM_ID, message)
   }
@@ -2300,21 +2454,14 @@ export class PiConductorApp {
     const workspace = this.getSelectedWorkspace()
     const agent = workspace ? this.store.getAgent(workspace.id) : null
 
-    let changedCount = 0
-    if (workspace) {
-      try {
-        changedCount = getChangedFiles(workspace.worktreePath).length
-      } catch {
-        changedCount = 0
-      }
-    }
-
-    const runCount = workspace ? this.runProcessCount(workspace.id) : 0
+    const mergeState = workspace ? this.evaluateWorkspaceMergeChecklist(workspace) : null
+    const changedCount = mergeState?.changedCount ?? 0
+    const runCount = mergeState?.runCount ?? 0
     const runState = runCount > 0 ? `running (${runCount})` : "idle"
-    const testState = workspace ? this.lastTestRunByWorkspace.get(workspace.id) ?? null : null
+    const testState = mergeState?.testState ?? null
     const testStatus = formatTestRunStatus(testState)
-    const diffFingerprint = workspace ? this.diffFingerprintByWorkspace.get(workspace.id) ?? "" : ""
-    const reviewedFingerprint = workspace ? this.reviewedDiffFingerprintByWorkspace.get(workspace.id) ?? null : null
+    const diffFingerprint = mergeState?.diffFingerprint ?? ""
+    const reviewedFingerprint = mergeState?.reviewedDiffFingerprint ?? null
     const readiness = evaluateWorkspaceReadiness({
       runCount,
       changedCount,
@@ -2323,9 +2470,10 @@ export class PiConductorApp {
       reviewedDiffFingerprint: reviewedFingerprint,
     })
     const readinessLabel = formatWorkspaceReadinessLabel(readiness)
+    const mergeLabel = workspace && mergeState ? mergeChecklistSummaryLabel(mergeState.evaluation) : "blocked · no workspace"
 
     const agentStatus = agent?.status ?? "stopped"
-    const turnInFlight = workspace ? this.agentTurnsInFlight.has(workspace.id) : false
+    const turnInFlight = mergeState?.turnInFlight ?? false
     const shouldShowAgentSpinner = agentStatus === "starting" || turnInFlight
     const agentStatusLabel = turnInFlight ? "running" : agentStatus
     this.agentBusy = shouldShowAgentSpinner
@@ -2346,6 +2494,7 @@ export class PiConductorApp {
       `run        ${runState} · mode=${this.runMode}`,
       `tests      ${testStatus}`,
       `readiness  ${readinessLabel}`,
+      `merge      ${mergeLabel}`,
       `changes    ${changedCount} files`,
     ]
 
