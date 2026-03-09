@@ -46,7 +46,7 @@ import { buildWorkspaceScriptEnv } from "./script-env"
 import { shouldStopExistingRun, stopSignalSequence } from "./run-policy"
 import { normalizeRunMode, parseRunCommandArgs, runCommandUsage, type RunMode } from "./run-command"
 import { formatRunExitSummary, formatRunLogLine } from "./run-log"
-import { renderDiffReviewMarkdown, type DiffViewMode } from "./diff-review"
+import { selectDiffReviewHunk, type DiffViewMode } from "./diff-review"
 import { formatTestRunStatus, nextTestRunFinished, nextTestRunStarted, type TestRunState } from "./test-status"
 import { LOADING_TOKEN, renderLoadingTokens } from "./loading"
 import { sanitizePiStderrLine, shouldSurfacePiStderr } from "./pi-stderr"
@@ -151,10 +151,11 @@ export interface AppSnapshot {
   statusText: string
   conversationTabsText: string
   conversationMarkdown: string
-  centerMode: "conversation" | "diff"
+  diffModalVisible: boolean
   diffViewMode: DiffViewMode
   diffReviewTitle: string
-  diffReviewMarkdown: string
+  diffReviewDiff: string
+  diffReviewFiletype: string | undefined
   diffHunkIndex: number
   diffHunkCount: number
   diffFileCount: number
@@ -189,6 +190,35 @@ function safeErr(error: unknown) {
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function filetypeForPath(filePath: string): string | undefined {
+  const ext = path.extname(filePath).toLowerCase()
+  switch (ext) {
+    case ".ts":
+      return "typescript"
+    case ".tsx":
+      return "tsx"
+    case ".js":
+      return "javascript"
+    case ".jsx":
+      return "jsx"
+    case ".json":
+      return "json"
+    case ".md":
+      return "markdown"
+    case ".yml":
+    case ".yaml":
+      return "yaml"
+    case ".sh":
+      return "bash"
+    case ".css":
+      return "css"
+    case ".html":
+      return "html"
+    default:
+      return undefined
+  }
 }
 
 function parseArgs(input: string): string[] {
@@ -295,12 +325,13 @@ export class PiConductorApp {
 
   private headerText = "Piductor · loading..."
   private statusText = "repo       <none>"
-  private centerMode: "conversation" | "diff" = "conversation"
+  private diffModalVisible = false
   private conversationTabsText = " All changes · Review branch changes · Debugging"
   private conversationMarkdown = DEFAULT_CONVERSATION
   private diffViewMode: DiffViewMode = "unified"
   private diffReviewTitle = "Review branch changes"
-  private diffReviewMarkdown = "Select a changed file to review."
+  private diffReviewDiff = ""
+  private diffReviewFiletype: string | undefined = undefined
   private diffReviewHunkCount = 0
   private diffReviewHunkIndex = 0
   private diffFileCount = 0
@@ -334,10 +365,11 @@ export class PiConductorApp {
     statusText: this.statusText,
     conversationTabsText: this.conversationTabsText,
     conversationMarkdown: this.conversationMarkdown,
-    centerMode: this.centerMode,
+    diffModalVisible: this.diffModalVisible,
     diffViewMode: this.diffViewMode,
     diffReviewTitle: this.diffReviewTitle,
-    diffReviewMarkdown: this.diffReviewMarkdown,
+    diffReviewDiff: this.diffReviewDiff,
+    diffReviewFiletype: this.diffReviewFiletype,
     diffHunkIndex: this.diffReviewHunkIndex,
     diffHunkCount: this.diffReviewHunkCount,
     diffFileCount: this.diffFileCount,
@@ -418,10 +450,11 @@ export class PiConductorApp {
       statusText: this.statusText,
       conversationTabsText: this.conversationTabsText,
       conversationMarkdown: this.conversationMarkdown,
-      centerMode: this.centerMode,
+      diffModalVisible: this.diffModalVisible,
       diffViewMode: this.diffViewMode,
       diffReviewTitle: this.diffReviewTitle,
-      diffReviewMarkdown: this.diffReviewMarkdown,
+      diffReviewDiff: this.diffReviewDiff,
+      diffReviewFiletype: this.diffReviewFiletype,
       diffHunkIndex: this.diffReviewHunkIndex,
       diffHunkCount: this.diffReviewHunkCount,
       diffFileCount: this.diffFileCount,
@@ -1141,7 +1174,7 @@ export class PiConductorApp {
 
         if (sub === "refresh") {
           this.refreshDiffPanel()
-          if (this.centerMode === "diff") {
+          if (this.diffModalVisible) {
             this.refreshDiffReviewPanel(true)
           }
           this.emitSnapshot()
@@ -1949,7 +1982,7 @@ export class PiConductorApp {
     this.diffSelectedIndex = clamped
 
     if (openReview) {
-      this.centerMode = "diff"
+      this.diffModalVisible = true
       this.refreshDiffReviewPanel(true)
     }
 
@@ -1961,9 +1994,10 @@ export class PiConductorApp {
     if (!workspace) return
 
     if (this.diffRows.length === 0) {
-      this.centerMode = "diff"
+      this.diffModalVisible = true
       this.diffReviewTitle = "Review branch changes"
-      this.diffReviewMarkdown = "No changed files to review."
+      this.diffReviewDiff = ""
+      this.diffReviewFiletype = undefined
       this.diffReviewHunkCount = 0
       this.diffReviewHunkIndex = 0
       this.emitSnapshot()
@@ -1977,13 +2011,13 @@ export class PiConductorApp {
       }
     }
 
-    this.centerMode = "diff"
+    this.diffModalVisible = true
     this.refreshDiffReviewPanel(true)
     this.emitSnapshot()
   }
 
   public closeDiffReview() {
-    this.centerMode = "conversation"
+    this.diffModalVisible = false
     this.emitSnapshot()
   }
 
@@ -1994,12 +2028,12 @@ export class PiConductorApp {
     const current = this.diffRows.findIndex((row) => row.path === this.selectedDiffPathByWorkspace.get(workspace.id))
     const start = current >= 0 ? current : 0
     const next = (start + delta + this.diffRows.length) % this.diffRows.length
-    this.selectDiffRow(next, this.centerMode === "diff")
+    this.selectDiffRow(next, this.diffModalVisible)
   }
 
   public cycleDiffHunk(delta: number) {
     const workspace = this.getSelectedWorkspace()
-    if (!workspace || this.centerMode !== "diff") return
+    if (!workspace || !this.diffModalVisible) return
 
     const current = this.selectedDiffHunkByWorkspace.get(workspace.id) ?? 0
     const max = Math.max(0, this.diffReviewHunkCount - 1)
@@ -2016,7 +2050,7 @@ export class PiConductorApp {
 
   public toggleDiffViewMode() {
     this.diffViewMode = this.diffViewMode === "unified" ? "split" : "unified"
-    if (this.centerMode === "diff") {
+    if (this.diffModalVisible) {
       this.refreshDiffReviewPanel(true)
     }
     this.emitSnapshot()
@@ -2209,7 +2243,8 @@ export class PiConductorApp {
     const workspace = this.getSelectedWorkspace()
     if (!workspace) {
       this.diffReviewTitle = "Review branch changes"
-      this.diffReviewMarkdown = "No workspace selected."
+      this.diffReviewDiff = ""
+      this.diffReviewFiletype = undefined
       this.diffReviewHunkCount = 0
       this.diffReviewHunkIndex = 0
       return
@@ -2218,7 +2253,8 @@ export class PiConductorApp {
     const selectedPath = this.selectedDiffPathByWorkspace.get(workspace.id)
     if (!selectedPath) {
       this.diffReviewTitle = "Review branch changes"
-      this.diffReviewMarkdown = "Select a changed file to review."
+      this.diffReviewDiff = ""
+      this.diffReviewFiletype = undefined
       this.diffReviewHunkCount = 0
       this.diffReviewHunkIndex = 0
       return
@@ -2234,25 +2270,22 @@ export class PiConductorApp {
     this.lastDiffReviewRefreshKey = refreshKey
 
     try {
-      const diffText = getDiffForFile(workspace.worktreePath, selectedPath)
-      const rendered = renderDiffReviewMarkdown({
-        path: selectedPath,
-        diffText,
-        mode: this.diffViewMode,
-        hunkIndex: selectedHunk,
-      })
+      const fullDiffText = getDiffForFile(workspace.worktreePath, selectedPath)
+      const selected = selectDiffReviewHunk(fullDiffText, selectedHunk)
 
-      this.diffReviewMarkdown = `${rendered.markdown}\n\n_Keys: m mode · n/p file · prev/next hunk ([ or ]) · q close_`
-      this.diffReviewHunkCount = rendered.hunkCount
-      this.diffReviewHunkIndex = rendered.activeHunkIndex
-      this.selectedDiffHunkByWorkspace.set(workspace.id, rendered.activeHunkIndex)
+      this.diffReviewDiff = selected.diffText
+      this.diffReviewFiletype = filetypeForPath(selectedPath)
+      this.diffReviewHunkCount = selected.hunkCount
+      this.diffReviewHunkIndex = selected.activeHunkIndex
+      this.selectedDiffHunkByWorkspace.set(workspace.id, selected.activeHunkIndex)
       this.diffReviewTitle =
-        rendered.hunkCount > 0
-          ? `${selectedPath} · ${this.diffViewMode} · hunk ${rendered.activeHunkIndex + 1}/${rendered.hunkCount}`
+        selected.hunkCount > 0
+          ? `${selectedPath} · ${this.diffViewMode} · hunk ${selected.activeHunkIndex + 1}/${selected.hunkCount}`
           : `${selectedPath} · ${this.diffViewMode}`
     } catch (error) {
       this.diffReviewTitle = `${selectedPath} · ${this.diffViewMode}`
-      this.diffReviewMarkdown = `Failed to load diff for ${selectedPath}: ${safeErr(error)}`
+      this.diffReviewDiff = `diff --git a/${selectedPath} b/${selectedPath}\n--- a/${selectedPath}\n+++ b/${selectedPath}\n@@ -0,0 +1 @@\n+Failed to load diff: ${safeErr(error)}`
+      this.diffReviewFiletype = filetypeForPath(selectedPath)
       this.diffReviewHunkCount = 0
       this.diffReviewHunkIndex = 0
     }
@@ -2266,7 +2299,7 @@ export class PiConductorApp {
       this.diffRows = []
       this.diffText = "No workspace selected."
       this.lastDiffReviewRefreshKey = ""
-      if (this.centerMode === "diff") {
+      if (this.diffModalVisible) {
         this.refreshDiffReviewPanel(true)
       }
       return
@@ -2283,7 +2316,7 @@ export class PiConductorApp {
         this.selectedDiffPathByWorkspace.delete(workspace.id)
         this.selectedDiffHunkByWorkspace.delete(workspace.id)
         this.lastDiffReviewRefreshKey = ""
-        if (this.centerMode === "diff") {
+        if (this.diffModalVisible) {
           this.refreshDiffReviewPanel(true)
         }
         return
@@ -2311,7 +2344,7 @@ export class PiConductorApp {
       this.diffText = stats.length > visible.length ? `... ${stats.length - visible.length} more files` : ""
       this.lastDiffReviewRefreshKey = ""
 
-      if (this.centerMode === "diff") {
+      if (this.diffModalVisible) {
         this.refreshDiffReviewPanel(true)
       }
     } catch (error) {
@@ -2320,7 +2353,7 @@ export class PiConductorApp {
       this.diffRows = []
       this.diffText = `Failed to read changes: ${safeErr(error)}`
       this.lastDiffReviewRefreshKey = ""
-      if (this.centerMode === "diff") {
+      if (this.diffModalVisible) {
         this.refreshDiffReviewPanel(true)
       }
     }
@@ -2352,7 +2385,7 @@ export class PiConductorApp {
 
 function PiConductorView({ app }: { app: PiConductorApp }) {
   const snapshot = useSyncExternalStore(app.subscribe, app.getSnapshot, app.getSnapshot)
-  const { width: terminalWidth } = useTerminalDimensions()
+  const { width: terminalWidth, height: terminalHeight } = useTerminalDimensions()
   const composerRef = useRef<TextareaRenderable | null>(null)
   const previousWorkspaceIdRef = useRef<number | null>(null)
   const draftStateRef = useRef<DraftState>({ globalDraft: "", byWorkspace: new Map<number, string>() })
@@ -2416,11 +2449,13 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
     24,
     terminalWidth - (leftVisible ? leftColumnWidth + 1 : 0) - (rightVisible ? rightColumnWidth + 1 : 0),
   )
+  const diffModalWidth = clamp(Math.floor(terminalWidth * 0.9), 72, Math.max(72, terminalWidth - 4))
+  const diffModalHeight = clamp(Math.floor(terminalHeight * 0.85), 16, Math.max(16, terminalHeight - 3))
   const headerActions = "/help · /mode · /ui"
   const headerWidth = Math.max(12, centerColumnWidth - 2)
   const minGap = 3
   const maxTitleWidth = Math.max(4, headerWidth - headerActions.length - minGap)
-  const centerTitle = snapshot.centerMode === "diff" ? snapshot.diffReviewTitle : snapshot.conversationTabsText
+  const centerTitle = snapshot.conversationTabsText
   const truncatedTitle =
     centerTitle.length > maxTitleWidth ? `${centerTitle.slice(0, Math.max(0, maxTitleWidth - 1))}…` : centerTitle
   const fillerLen = Math.max(1, headerWidth - truncatedTitle.length - headerActions.length - 2)
@@ -2444,7 +2479,8 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
   const thinkingIndicatorText = snapshot.thinkingActive
     ? `${composerSpinner || "•"} Thinking${snapshot.thinkingPreview ? ` · ${snapshot.thinkingPreview}` : "…"}`
     : ""
-  const centerMarkdown = snapshot.centerMode === "diff" ? snapshot.diffReviewMarkdown : snapshot.conversationMarkdown
+  const centerMarkdown = snapshot.conversationMarkdown
+  const diffHunkLabel = snapshot.diffHunkCount > 0 ? `${snapshot.diffHunkIndex + 1}/${snapshot.diffHunkCount}` : "-"
 
   const statusRows = snapshot.statusText
     .split("\n")
@@ -2648,7 +2684,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
       }
     }
 
-    if (snapshot.centerMode === "diff" && focusTarget !== "input") {
+    if (snapshot.diffModalVisible && focusTarget !== "input") {
       if (key.name === "m") {
         key.preventDefault()
         app.toggleDiffViewMode()
@@ -3073,7 +3109,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
               border={false}
               scrollY
               scrollX={false}
-              stickyScroll={snapshot.centerMode === "conversation"}
+              stickyScroll
               stickyStart="bottom"
               shouldFill
               style={{
@@ -3100,7 +3136,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                 width="100%"
               />
 
-              {snapshot.centerMode === "conversation" && snapshot.thinkingActive && (
+              {snapshot.thinkingActive && (
                 <text
                   id="pc-thinking-indicator"
                   content={thinkingIndicatorText}
@@ -3472,6 +3508,199 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
         )}
       </box>
 
+      {snapshot.diffModalVisible && (
+        <box
+          id="pc-diff-modal-backdrop"
+          position="absolute"
+          left={0}
+          top={0}
+          width="100%"
+          height="100%"
+          backgroundColor="#090d15"
+          onMouseDown={(event) => {
+            event.preventDefault()
+          }}
+          style={{
+            zIndex: 90,
+          }}
+        >
+          <box
+            id="pc-diff-modal"
+            position="absolute"
+            left="50%"
+            top="50%"
+            width={diffModalWidth}
+            height={diffModalHeight}
+            marginLeft={-Math.floor(diffModalWidth / 2)}
+            marginTop={-Math.floor(diffModalHeight / 2)}
+            border
+            borderStyle="double"
+            borderColor="#60a5fa"
+            backgroundColor="#0f172a"
+            title={`Review branch changes · ${snapshot.diffViewMode}`}
+            titleAlignment="center"
+            onMouseDown={(event) => {
+              event.preventDefault()
+            }}
+            style={{
+              flexDirection: "column",
+              paddingLeft: 1,
+              paddingRight: 1,
+              paddingTop: 1,
+              paddingBottom: 1,
+            }}
+          >
+            <box
+              id="pc-diff-modal-header"
+              height={1}
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                flexShrink: 0,
+              }}
+            >
+              <text
+                id="pc-diff-modal-title"
+                content={snapshot.diffReviewTitle}
+                fg="#dbeafe"
+                wrapMode="none"
+                style={{
+                  flexGrow: 1,
+                  flexShrink: 1,
+                }}
+              />
+
+              <box
+                id="pc-diff-modal-mode-btn"
+                onMouseDown={(event) => {
+                  event.preventDefault()
+                  app.toggleDiffViewMode()
+                }}
+              >
+                <text content={`[Mode: ${snapshot.diffViewMode}]`} fg="#93c5fd" wrapMode="none" selectable={false} />
+              </box>
+
+              <text content=" " fg="#93c5fd" wrapMode="none" selectable={false} />
+
+              <box
+                id="pc-diff-modal-close-btn"
+                onMouseDown={(event) => {
+                  event.preventDefault()
+                  app.closeDiffReview()
+                }}
+              >
+                <text content="[Close]" fg="#fca5a5" wrapMode="none" selectable={false} />
+              </box>
+            </box>
+
+            {snapshot.diffReviewDiff.trim().length > 0 ? (
+              <diff
+                id="pc-diff-modal-view"
+                diff={snapshot.diffReviewDiff}
+                view={snapshot.diffViewMode}
+                filetype={snapshot.diffReviewFiletype}
+                showLineNumbers
+                wrapMode="none"
+                lineNumberFg="#64748b"
+                lineNumberBg="#0b1220"
+                addedBg="#123320"
+                removedBg="#3d1823"
+                contextBg="#0b1220"
+                addedSignColor="#86efac"
+                removedSignColor="#fca5a5"
+                addedLineNumberBg="#123320"
+                removedLineNumberBg="#3d1823"
+                style={{
+                  flexGrow: 1,
+                  flexShrink: 1,
+                  marginTop: 1,
+                  marginBottom: 1,
+                }}
+              />
+            ) : (
+              <text
+                id="pc-diff-modal-empty"
+                content="No changed files to review."
+                fg="#cbd5e1"
+                wrapMode="word"
+                style={{
+                  flexGrow: 1,
+                  marginTop: 1,
+                }}
+              />
+            )}
+
+            <box
+              id="pc-diff-modal-footer"
+              height={1}
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                flexShrink: 0,
+              }}
+            >
+              <box
+                id="pc-diff-modal-prev-file"
+                onMouseDown={(event) => {
+                  event.preventDefault()
+                  app.cycleDiffFile(-1)
+                }}
+              >
+                <text content="[◀ File]" fg="#93c5fd" wrapMode="none" selectable={false} />
+              </box>
+
+              <text content=" " fg="#93c5fd" wrapMode="none" selectable={false} />
+
+              <box
+                id="pc-diff-modal-next-file"
+                onMouseDown={(event) => {
+                  event.preventDefault()
+                  app.cycleDiffFile(1)
+                }}
+              >
+                <text content="[File ▶]" fg="#93c5fd" wrapMode="none" selectable={false} />
+              </box>
+
+              <text content=" " fg="#93c5fd" wrapMode="none" selectable={false} />
+
+              <box
+                id="pc-diff-modal-prev-hunk"
+                onMouseDown={(event) => {
+                  event.preventDefault()
+                  app.cycleDiffHunk(-1)
+                }}
+              >
+                <text content="[◀ Hunk]" fg="#93c5fd" wrapMode="none" selectable={false} />
+              </box>
+
+              <text content=" " fg="#93c5fd" wrapMode="none" selectable={false} />
+
+              <box
+                id="pc-diff-modal-next-hunk"
+                onMouseDown={(event) => {
+                  event.preventDefault()
+                  app.cycleDiffHunk(1)
+                }}
+              >
+                <text content="[Hunk ▶]" fg="#93c5fd" wrapMode="none" selectable={false} />
+              </box>
+
+              <text
+                content={`  hunk ${diffHunkLabel}`}
+                fg="#94a3b8"
+                wrapMode="none"
+                selectable={false}
+                style={{
+                  flexGrow: 1,
+                  flexShrink: 1,
+                }}
+              />
+
+              <text content="/diff close" fg="#64748b" wrapMode="none" selectable={false} />
+            </box>
+          </box>
+        </box>
+      )}
     </box>
   )
 }

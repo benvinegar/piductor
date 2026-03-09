@@ -130,3 +130,31 @@ export function renderDiffReviewMarkdown(params: {
     activeHunkIndex,
   }
 }
+
+export type DiffReviewSelection = {
+  diffText: string
+  hunkCount: number
+  activeHunkIndex: number
+}
+
+export function selectDiffReviewHunk(diffText: string, hunkIndex: number): DiffReviewSelection {
+  const parsed = parseFileDiff(diffText)
+  const hunkCount = parsed.hunks.length
+
+  if (hunkCount === 0) {
+    return {
+      diffText,
+      hunkCount: 0,
+      activeHunkIndex: 0,
+    }
+  }
+
+  const activeHunkIndex = clamp(hunkIndex, 0, hunkCount - 1)
+  const activeHunk = parsed.hunks[activeHunkIndex]
+
+  return {
+    diffText: [...parsed.meta, activeHunk.header, ...activeHunk.lines].join("\n").trimEnd(),
+    hunkCount,
+    activeHunkIndex,
+  }
+}

@@ -88,7 +88,8 @@ Plain text input sends a message to the selected workspace agent using the curre
 - Drag vertical separators to resize left/right columns
 - Click sidebar section headers to collapse/expand workspace tree, status, changes, and run terminal
 - Click repo rows in the workspace tree to expand/collapse nested workspaces
-- In diff review mode (when focus is not in composer): `m` toggle unified/split, `n`/`p` next/prev file, `[`/`]` prev/next hunk, `q` close review
+- Diff review opens as a modal overlay with mouse controls: click `Mode`, `Close`, `◀/▶ File`, and `◀/▶ Hunk` buttons
+- Optional keyboard shortcuts in diff review (when focus is not in composer): `m` toggle unified/split, `n`/`p` next/prev file, `[`/`]` prev/next hunk, `q` close review
 
 ## Configuration
 
