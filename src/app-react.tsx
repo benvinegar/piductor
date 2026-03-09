@@ -44,6 +44,7 @@ import { extractFirstUrl, parsePrCreateArgs, prCreateUsage } from "./pr-command"
 import { buildWorkspaceScriptEnv } from "./script-env"
 import { shouldStopExistingRun, stopSignalSequence } from "./run-policy"
 import { normalizeRunMode, parseRunCommandArgs, runCommandUsage, type RunMode } from "./run-command"
+import { formatRunExitSummary, formatRunLogLine } from "./run-log"
 import { LOADING_TOKEN, renderLoadingTokens } from "./loading"
 import { sanitizePiStderrLine, shouldSurfacePiStderr } from "./pi-stderr"
 import { parseAgentCommand, resolveRestartModel } from "./agent-control"
@@ -117,6 +118,13 @@ type DiffRow = {
   plus: string
   minus: string
   path: string
+}
+
+type RunProcessEntry = {
+  id: number
+  label: string
+  command: string
+  child: ChildProcessWithoutNullStreams
 }
 
 export interface AppSnapshot {
@@ -257,7 +265,8 @@ export class PiConductorApp {
   private readonly runLogsByWorkspace = new Map<number, string[]>()
   private readonly assistantPartialByWorkspace = new Map<number, string>()
   private readonly thinkingPartialByWorkspace = new Map<number, string>()
-  private readonly runProcessesByWorkspace = new Map<number, Set<ChildProcessWithoutNullStreams>>()
+  private readonly runProcessesByWorkspace = new Map<number, Set<RunProcessEntry>>()
+  private readonly runSequenceByWorkspace = new Map<number, number>()
   private readonly agentTurnsInFlight = new Set<number>()
   private readonly expandedRepoIds = new Set<number>()
   private readonly lastActivityByWorkspace = new Map<number, string>()
@@ -1052,19 +1061,25 @@ export class PiConductorApp {
     return this.runProcessesByWorkspace.get(workspaceId)?.size ?? 0
   }
 
-  private trackRunProcess(workspaceId: number, child: ChildProcessWithoutNullStreams) {
-    const running = this.runProcessesByWorkspace.get(workspaceId) ?? new Set<ChildProcessWithoutNullStreams>()
-    running.add(child)
+  private nextRunId(workspaceId: number): number {
+    const next = (this.runSequenceByWorkspace.get(workspaceId) ?? 0) + 1
+    this.runSequenceByWorkspace.set(workspaceId, next)
+    return next
+  }
+
+  private trackRunProcess(workspaceId: number, entry: RunProcessEntry) {
+    const running = this.runProcessesByWorkspace.get(workspaceId) ?? new Set<RunProcessEntry>()
+    running.add(entry)
     this.runProcessesByWorkspace.set(workspaceId, running)
   }
 
-  private untrackRunProcess(workspaceId: number, child: ChildProcessWithoutNullStreams) {
+  private untrackRunProcess(workspaceId: number, entry: RunProcessEntry) {
     const running = this.runProcessesByWorkspace.get(workspaceId)
     if (!running) {
       return
     }
 
-    running.delete(child)
+    running.delete(entry)
     if (running.size === 0) {
       this.runProcessesByWorkspace.delete(workspaceId)
     }
@@ -1074,20 +1089,19 @@ export class PiConductorApp {
     const running = [...(this.runProcessesByWorkspace.get(workspaceId) ?? [])]
     if (running.length === 0) return
 
-    this.appendRunLog(workspaceId, `[run] stopping ${running.length} process(es) (${reason}) ...`)
-
     const [gracefulSignal, forceSignal] = stopSignalSequence()
-    for (const child of running) {
-      this.signalRunProcess(child, gracefulSignal)
+    for (const entry of running) {
+      this.appendRunLog(workspaceId, formatRunLogLine(entry.id, "meta", `stopping (${reason}) ...`))
+      this.signalRunProcess(entry.child, gracefulSignal)
     }
     await sleep(220)
 
     const remaining = [...(this.runProcessesByWorkspace.get(workspaceId) ?? [])]
     if (remaining.length > 0) {
-      for (const child of remaining) {
-        this.signalRunProcess(child, forceSignal)
+      for (const entry of remaining) {
+        this.signalRunProcess(entry.child, forceSignal)
+        this.appendRunLog(workspaceId, formatRunLogLine(entry.id, "meta", `escalated to ${forceSignal}`))
       }
-      this.appendRunLog(workspaceId, `[run] escalated ${remaining.length} process(es) to ${forceSignal}`)
     }
 
     this.refreshTerminalPanel()
@@ -1298,6 +1312,8 @@ export class PiConductorApp {
       await this.stopRunProcess(workspaceId, "nonconcurrent mode")
     }
 
+    const runId = this.nextRunId(workspaceId)
+
     const defaultBranch = getDefaultBranchName(repo.rootPath)
     const scriptEnv = buildWorkspaceScriptEnv({
       baseEnv: process.env,
@@ -1316,10 +1332,11 @@ export class PiConductorApp {
     child.stdout.setEncoding("utf8")
     child.stderr.setEncoding("utf8")
 
-    this.trackRunProcess(workspaceId, child)
-    this.appendWorkspaceLog(workspaceId, `[${label}] started (mode=${this.runMode})`)
-    this.appendRunLog(workspaceId, `[${label}] mode=${this.runMode} active=${this.runProcessCount(workspaceId)}`)
-    this.appendRunLog(workspaceId, `$ ${command}`)
+    const runEntry: RunProcessEntry = { id: runId, label, command, child }
+    this.trackRunProcess(workspaceId, runEntry)
+    this.appendWorkspaceLog(workspaceId, `[${label}#${runId}] started (mode=${this.runMode})`)
+    this.appendRunLog(workspaceId, formatRunLogLine(runId, "meta", `${label} mode=${this.runMode} active=${this.runProcessCount(workspaceId)}`))
+    this.appendRunLog(workspaceId, formatRunLogLine(runId, "cmd", `$ ${command}`))
     this.refreshTerminalPanel()
     this.refreshStatusPanel()
     this.emitSnapshot()
@@ -1336,7 +1353,7 @@ export class PiConductorApp {
             continue
           }
 
-          this.appendRunLog(workspaceId, `[${label}/${prefix}] ${line}`)
+          this.appendRunLog(workspaceId, formatRunLogLine(runId, prefix === "out" ? "out" : "err", line))
           if (this.selectedWorkspaceId === workspaceId) {
             this.scheduleUiFlush()
           }
@@ -1349,12 +1366,9 @@ export class PiConductorApp {
 
     const exitPromise = new Promise<void>((resolve) => {
       child.once("close", (code, signal) => {
-        this.untrackRunProcess(workspaceId, child)
-        this.appendWorkspaceLog(
-          workspaceId,
-          `[${label}] exited code=${code ?? "null"} signal=${signal ?? "none"}`,
-        )
-        this.appendRunLog(workspaceId, `[${label}] exited code=${code ?? "null"} signal=${signal ?? "none"}`)
+        this.untrackRunProcess(workspaceId, runEntry)
+        this.appendWorkspaceLog(workspaceId, `[${label}#${runId}] ${formatRunExitSummary(code, signal)}`)
+        this.appendRunLog(workspaceId, formatRunLogLine(runId, "exit", formatRunExitSummary(code, signal)))
         this.reloadWorkspaces(this.selectedWorkspaceId)
         this.refreshStatusPanel()
         this.refreshDiffPanel()
