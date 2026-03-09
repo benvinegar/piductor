@@ -114,4 +114,19 @@ describe("conversation-render", () => {
     expect(rendered).toContain("└ Run `npm test`")
     expect(rendered).toContain("└ ⚠️ Bash failed: `permission denied`")
   })
+
+  it("groups adjacent tool reads across assistant message breaks", () => {
+    const rendered = toConversationMarkdown([
+      "[12:00:00] [tool] Read `README.md`",
+      "[12:00:01] [assistant-break]",
+      "[12:00:02] [tool] Read `src/a.ts`",
+      "[12:00:03] [assistant-break]",
+      "[12:00:04] [tool] Read `src/b.ts`",
+    ])
+
+    expect(rendered.match(/• Explored/g)?.length ?? 0).toBe(1)
+    expect(rendered).toContain("└ Read `README.md`")
+    expect(rendered).toContain("└ Read `src/a.ts`")
+    expect(rendered).toContain("└ Read `src/b.ts`")
+  })
 })

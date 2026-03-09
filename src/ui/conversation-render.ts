@@ -292,7 +292,6 @@ export function toConversationBlocks(lines: string[]): ConversationBlock[] {
 
     if (line.startsWith("[assistant-break]")) {
       flushAssistant()
-      flushTimeline()
       continue
     }
 
