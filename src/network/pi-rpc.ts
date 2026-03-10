@@ -211,6 +211,16 @@ export class PiRpcProcess {
     await this.sendExpectSuccess({ type: "switch_session", sessionPath })
   }
 
+  async getAvailableModels(): Promise<any[]> {
+    const response = await this.sendExpectSuccess({ type: "get_available_models" })
+    return Array.isArray(response.data?.models) ? response.data.models : []
+  }
+
+  async setModel(provider: string, modelId: string): Promise<any> {
+    const response = await this.sendExpectSuccess({ type: "set_model", provider, modelId })
+    return response.data
+  }
+
   async setSessionName(name: string): Promise<void> {
     await this.sendExpectSuccess({ type: "set_session_name", name })
   }

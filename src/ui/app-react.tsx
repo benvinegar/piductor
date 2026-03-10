@@ -192,6 +192,14 @@ type RunProcessEntry = {
   child: ChildProcessWithoutNullStreams
 }
 
+type ModelOption = {
+  key: string
+  provider: string
+  modelId: string
+  name: string
+  description: string
+}
+
 export interface AppSnapshot {
   repos: RepoRecord[]
   workspaces: WorkspaceRecord[]
@@ -222,6 +230,9 @@ export interface AppSnapshot {
   commandModalMarkdown: string
   themeModalVisible: boolean
   themeModalSelectedIndex: number
+  modelModalVisible: boolean
+  modelModalSelectedIndex: number
+  modelOptions: ModelOption[]
   diffModalVisible: boolean
   diffViewMode: DiffViewMode
   diffReviewTitle: string
@@ -257,6 +268,56 @@ function isLikelyGitUrl(value: string) {
 
 function safeErr(error: unknown) {
   return error instanceof Error ? error.message : String(error)
+}
+
+function toModelKey(provider: string, modelId: string): string {
+  return `${provider}/${modelId}`
+}
+
+function parseModelKey(value: string | null | undefined): { provider: string; modelId: string } | null {
+  if (!value) {
+    return null
+  }
+
+  const trimmed = value.trim()
+  if (trimmed.length === 0) {
+    return null
+  }
+
+  const slash = trimmed.indexOf("/")
+  if (slash <= 0 || slash >= trimmed.length - 1) {
+    return null
+  }
+
+  const provider = trimmed.slice(0, slash).trim()
+  const modelId = trimmed.slice(slash + 1).trim()
+  if (!provider || !modelId) {
+    return null
+  }
+
+  return { provider, modelId }
+}
+
+function toModelOption(raw: any): ModelOption | null {
+  const provider = typeof raw?.provider === "string" ? raw.provider.trim() : ""
+  const modelId = typeof raw?.id === "string" ? raw.id.trim() : ""
+  if (!provider || !modelId) {
+    return null
+  }
+
+  const nameRaw = typeof raw?.name === "string" ? raw.name.trim() : ""
+  const name = nameRaw.length > 0 ? nameRaw : modelId
+  const key = toModelKey(provider, modelId)
+  const contextWindow = typeof raw?.contextWindow === "number" ? raw.contextWindow : null
+  const description = contextWindow ? `${provider} · ${contextWindow.toLocaleString()} ctx` : provider
+
+  return {
+    key,
+    provider,
+    modelId,
+    name,
+    description,
+  }
 }
 
 function isPidAlive(pid: number): boolean {
@@ -417,6 +478,9 @@ export class PiConductorApp {
   private commandModalMarkdown = ""
   private themeModalVisible = false
   private themeModalSelectedIndex = 0
+  private modelModalVisible = false
+  private modelModalSelectedIndex = 0
+  private modelOptions: ModelOption[] = []
   private diffViewMode: DiffViewMode = "unified"
   private diffReviewTitle = "Review branch changes"
   private diffReviewDiff = ""
@@ -466,6 +530,9 @@ export class PiConductorApp {
     commandModalMarkdown: this.commandModalMarkdown,
     themeModalVisible: this.themeModalVisible,
     themeModalSelectedIndex: this.themeModalSelectedIndex,
+    modelModalVisible: this.modelModalVisible,
+    modelModalSelectedIndex: this.modelModalSelectedIndex,
+    modelOptions: [],
     diffModalVisible: this.diffModalVisible,
     diffViewMode: this.diffViewMode,
     diffReviewTitle: this.diffReviewTitle,
@@ -568,6 +635,9 @@ export class PiConductorApp {
       commandModalMarkdown: this.commandModalMarkdown,
       themeModalVisible: this.themeModalVisible,
       themeModalSelectedIndex: this.themeModalSelectedIndex,
+      modelModalVisible: this.modelModalVisible,
+      modelModalSelectedIndex: this.modelModalSelectedIndex,
+      modelOptions: this.modelOptions.map((option) => ({ ...option })),
       diffModalVisible: this.diffModalVisible,
       diffViewMode: this.diffViewMode,
       diffReviewTitle: this.diffReviewTitle,
@@ -1376,6 +1446,17 @@ export class PiConductorApp {
         }
 
         this.openThemeModal()
+        return
+      }
+
+      case "model": {
+        if (args.length > 0) {
+          this.appendGlobalLog("Usage: /model")
+          this.appendGlobalLog("Use the picker (↑/↓, Enter) to choose a model.")
+          return
+        }
+
+        await this.openModelModal()
         return
       }
 
@@ -2834,6 +2915,157 @@ export class PiConductorApp {
     this.emitSnapshot()
   }
 
+  private async resolveModelOptionsForWorkspace(workspaceId: number): Promise<ModelOption[]> {
+    const deduped = new Map<string, ModelOption>()
+
+    const add = (option: ModelOption | null) => {
+      if (!option) return
+      if (!deduped.has(option.key)) {
+        deduped.set(option.key, option)
+      }
+    }
+
+    const current = this.store.getAgent(workspaceId)
+    const currentModel = current?.model ?? this.config.defaultModel ?? null
+    const parsedCurrent = parseModelKey(currentModel)
+    if (parsedCurrent) {
+      add({
+        key: toModelKey(parsedCurrent.provider, parsedCurrent.modelId),
+        provider: parsedCurrent.provider,
+        modelId: parsedCurrent.modelId,
+        name: parsedCurrent.modelId,
+        description: `${parsedCurrent.provider} · preferred`,
+      })
+    }
+
+    const runningAgent = this.agentByWorkspace.get(workspaceId)
+    if (runningAgent) {
+      try {
+        const modelsRaw = await runningAgent.getAvailableModels()
+        for (const raw of modelsRaw) {
+          add(toModelOption(raw))
+        }
+      } catch {
+        // Ignore model catalog fetch failures and fall back to known model labels.
+      }
+    }
+
+    return [...deduped.values()]
+  }
+
+  private async applyModelOptionSelection(option: ModelOption): Promise<void> {
+    const workspace = this.getSelectedWorkspace()
+    if (!workspace) {
+      this.appendGlobalLog("No workspace selected.")
+      return
+    }
+
+    const modelKey = toModelKey(option.provider, option.modelId)
+    const runningAgent = this.agentByWorkspace.get(workspace.id)
+    const current = this.store.getAgent(workspace.id)
+
+    if (!runningAgent) {
+      this.store.setAgentState({
+        workspaceId: workspace.id,
+        status: current?.status ?? "stopped",
+        pid: current?.pid ?? null,
+        model: modelKey,
+        sessionId: current?.sessionId ?? null,
+        lastError: current?.lastError ?? null,
+      })
+      this.appendWorkspaceLog(workspace.id, `[model] set preferred model to ${modelKey} (applies on next /agent start)`)
+      return
+    }
+
+    try {
+      const next = await runningAgent.setModel(option.provider, option.modelId)
+      const nextProvider = typeof next?.provider === "string" && next.provider.trim().length > 0 ? next.provider.trim() : option.provider
+      const nextModelId = typeof next?.id === "string" && next.id.trim().length > 0 ? next.id.trim() : option.modelId
+      const resolved = toModelKey(nextProvider, nextModelId)
+
+      this.store.setAgentState({
+        workspaceId: workspace.id,
+        status: current?.status ?? "running",
+        pid: runningAgent.pid ?? current?.pid ?? null,
+        model: resolved,
+        sessionId: current?.sessionId ?? null,
+        lastError: null,
+      })
+      this.appendWorkspaceLog(workspace.id, `[model] switched to ${resolved}`)
+    } catch (error) {
+      this.appendWorkspaceLog(workspace.id, `[model] failed to switch model: ${safeErr(error)}`)
+    }
+  }
+
+  public async openModelModal() {
+    const workspace = this.getSelectedWorkspace()
+    if (!workspace) {
+      this.appendGlobalLog("No workspace selected.")
+      return
+    }
+
+    const options = await this.resolveModelOptionsForWorkspace(workspace.id)
+    if (options.length === 0) {
+      this.appendWorkspaceLog(workspace.id, "[model] no models available. Start agent to load model catalog.")
+      return
+    }
+
+    this.modelOptions = options
+    const currentModel = this.store.getAgent(workspace.id)?.model ?? this.config.defaultModel ?? null
+    const parsedCurrent = parseModelKey(currentModel)
+    const currentKey = parsedCurrent ? toModelKey(parsedCurrent.provider, parsedCurrent.modelId) : currentModel
+
+    const selected = currentKey ? options.findIndex((option) => option.key === currentKey) : -1
+    this.modelModalSelectedIndex = selected >= 0 ? selected : 0
+    this.modelModalVisible = true
+    this.emitSnapshot()
+  }
+
+  public closeModelModal() {
+    if (!this.modelModalVisible) return
+    this.modelModalVisible = false
+    this.emitSnapshot()
+  }
+
+  public moveModelModalSelection(delta: number) {
+    if (!this.modelModalVisible) return
+    if (this.modelOptions.length === 0) return
+
+    const total = this.modelOptions.length
+    const current = Math.max(0, Math.min(this.modelModalSelectedIndex, total - 1))
+    this.modelModalSelectedIndex = (current + delta + total) % total
+    this.emitSnapshot()
+  }
+
+  public async applyModelModalSelection() {
+    if (!this.modelModalVisible) return
+    const selected = this.modelOptions[this.modelModalSelectedIndex]
+    if (!selected) return
+
+    await this.applyModelOptionSelection(selected)
+    this.modelModalVisible = false
+    this.refreshStatusPanel()
+    this.emitSnapshot()
+  }
+
+  public async setModelModalSelection(index: number, applyImmediately = false) {
+    if (this.modelOptions.length === 0) return
+
+    const clamped = Math.max(0, Math.min(index, this.modelOptions.length - 1))
+    this.modelModalSelectedIndex = clamped
+
+    if (applyImmediately) {
+      const selected = this.modelOptions[clamped]
+      if (selected) {
+        await this.applyModelOptionSelection(selected)
+      }
+      this.modelModalVisible = false
+      this.refreshStatusPanel()
+    }
+
+    this.emitSnapshot()
+  }
+
   public openDiffReview() {
     const workspace = this.getSelectedWorkspace()
     if (!workspace) return
@@ -3501,9 +3733,11 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
   const commandModalHeight = clamp(Math.floor(terminalHeight * 0.72), 14, Math.max(14, terminalHeight - 4))
   const themeModalWidth = clamp(Math.floor(terminalWidth * 0.52), 54, Math.max(54, terminalWidth - 8))
   const themeModalHeight = clamp(Math.floor(terminalHeight * 0.58), 12, Math.max(12, terminalHeight - 6))
+  const modelModalWidth = clamp(Math.floor(terminalWidth * 0.58), 58, Math.max(58, terminalWidth - 8))
+  const modelModalHeight = clamp(Math.floor(terminalHeight * 0.62), 14, Math.max(14, terminalHeight - 6))
   const diffModalWidth = clamp(Math.floor(terminalWidth * 0.9), 72, Math.max(72, terminalWidth - 4))
   const diffModalHeight = clamp(Math.floor(terminalHeight * 0.85), 16, Math.max(16, terminalHeight - 3))
-  const headerActions = "/help · /mode · /theme · /ui"
+  const headerActions = "/help · /mode · /model · /theme · /ui"
   const headerWidth = Math.max(12, centerColumnWidth - 2)
   const minGap = 3
   const maxTitleWidth = Math.max(4, headerWidth - headerActions.length - minGap)
@@ -3543,11 +3777,13 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
   const commandQuery = hasSlashCommandPrefix ? composerFirstLine.trimStart().slice(1) : ""
   const commandSuggestions = findCommandSuggestions(commandQuery)
   const themeOptions = listThemes()
+  const selectedModelOption = snapshot.modelOptions[snapshot.modelModalSelectedIndex] ?? null
   const commandAutocompleteVisible =
     focusTarget === "input" &&
     !workspaceSelectionMode &&
     !createWorkspaceModalVisible &&
     !snapshot.themeModalVisible &&
+    !snapshot.modelModalVisible &&
     !snapshot.commandModalVisible &&
     hasSlashCommandPrefix
   const selectedCommandSuggestion = commandSuggestions[commandSuggestionIndex] ?? commandSuggestions[0] ?? null
@@ -3809,6 +4045,34 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
       return
     }
 
+    if (snapshot.modelModalVisible && key.name === "escape") {
+      key.preventDefault()
+      app.closeModelModal()
+      return
+    }
+
+    if (snapshot.modelModalVisible) {
+      if (key.name === "up") {
+        key.preventDefault()
+        app.moveModelModalSelection(-1)
+        return
+      }
+
+      if (key.name === "down") {
+        key.preventDefault()
+        app.moveModelModalSelection(1)
+        return
+      }
+
+      if (key.name === "return" || key.name === "linefeed") {
+        key.preventDefault()
+        void app.applyModelModalSelection()
+        return
+      }
+
+      return
+    }
+
     if (snapshot.commandModalVisible && key.name === "escape") {
       key.preventDefault()
       app.closeCommandModal()
@@ -3970,6 +4234,12 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
     }
 
     if (key.name === "tab") {
+      if (!key.shift && focusTarget === "input" && !workspaceSelectionMode && !commandAutocompleteVisible) {
+        key.preventDefault()
+        app.togglePlanBuildModeForCurrentSelection()
+        return
+      }
+
       key.preventDefault()
       const tabTargets: FocusTarget[] = workspaceSelectionMode ? ["workspace"] : ["input"]
 
@@ -5182,6 +5452,112 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
             </scrollbox>
 
             <text content="Enter applies selected theme" fg={colors.textSubtle} wrapMode="none" selectable={false} />
+          </box>
+        </box>
+      )}
+
+      {snapshot.modelModalVisible && (
+        <box
+          id="pc-model-modal-backdrop"
+          position="absolute"
+          left={0}
+          top={0}
+          width="100%"
+          height="100%"
+          backgroundColor={colors.modalOverlayBackground}
+          onMouseDown={(event) => {
+            event.preventDefault()
+            app.closeModelModal()
+          }}
+          style={{
+            zIndex: 92,
+          }}
+        >
+          <box
+            id="pc-model-modal"
+            position="absolute"
+            left="50%"
+            top="50%"
+            width={modelModalWidth}
+            height={modelModalHeight}
+            marginLeft={-Math.floor(modelModalWidth / 2)}
+            marginTop={-Math.floor(modelModalHeight / 2)}
+            border
+            borderStyle="double"
+            borderColor={colors.modalBorder}
+            backgroundColor={colors.modalBackground}
+            title={`Model · ${selectedModelOption?.name ?? "Select"}`}
+            titleAlignment="center"
+            onMouseDown={(event) => {
+              event.preventDefault()
+            }}
+            style={{
+              flexDirection: "column",
+              paddingLeft: 1,
+              paddingRight: 1,
+              paddingTop: 1,
+              paddingBottom: 1,
+            }}
+          >
+            <text
+              content="Use ↑/↓ to select, Enter to apply, Esc to close"
+              fg={colors.textMuted}
+              wrapMode="none"
+              style={{
+                flexShrink: 0,
+              }}
+            />
+
+            <scrollbox
+              id="pc-model-modal-scroll"
+              border={false}
+              scrollY
+              scrollX={false}
+              shouldFill
+              style={{
+                flexGrow: 1,
+                marginTop: 1,
+              }}
+            >
+              {snapshot.modelOptions.map((option, index) => {
+                const selected = index === snapshot.modelModalSelectedIndex
+                const active = option.key === snapshot.modelLabel
+                const label = `${selected ? "›" : " "} ${option.name}${active ? " · current" : ""}`
+                const metadata = `  ${option.provider}/${option.modelId}${option.description ? ` · ${option.description}` : ""}`
+
+                return (
+                  <box
+                    key={`pc-model-option-${option.key}`}
+                    width="100%"
+                    height={2}
+                    backgroundColor={selected ? colors.selectedBackground : "transparent"}
+                    onMouseDown={(event) => {
+                      event.preventDefault()
+                      void app.setModelModalSelection(index, true)
+                    }}
+                    style={{
+                      flexDirection: "column",
+                      flexShrink: 0,
+                      marginBottom: index === snapshot.modelOptions.length - 1 ? 0 : 1,
+                    }}
+                  >
+                    <text content={label} fg={selected ? colors.selectedText : colors.textPrimary} wrapMode="none" />
+                    <text content={metadata} fg={colors.textMuted} wrapMode="none" />
+                  </box>
+                )
+              })}
+            </scrollbox>
+
+            <text
+              content="Enter applies selected model"
+              fg={colors.textSubtle}
+              wrapMode="none"
+              selectable={false}
+              style={{
+                marginTop: 1,
+                flexShrink: 0,
+              }}
+            />
           </box>
         </box>
       )}

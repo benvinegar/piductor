@@ -21,7 +21,7 @@ Built with:
 - Archive and restore workspaces
 - Show per-file change stats (`+/-`) in a review panel
 - Collapse sidebars, resize side columns with mouse drag, and collapse sidebar sections
-- Switch between 5 built-in UI themes (`/theme`) with persistence across restarts
+- Switch between 5 built-in UI themes (`/theme`) and available agent models (`/model`) via picker modals
 - Navigate a unified workspace tree grouped by repo (`repo -> workspaces`) with expandable repo rows
 
 ## Install
@@ -59,6 +59,7 @@ bun run dev
 /agent start [model]
 /agent stop
 /mode <prompt|steer|follow_up>
+/model
 /theme
 /pr create [--dry-run]
 /pr status
@@ -87,6 +88,8 @@ Plain text input sends a message to the selected workspace agent using the curre
 
 Type `/` in the composer to open command autocomplete (mouse-select or `Tab` to apply a suggestion).
 
+Use `/model` to open the model picker (↑/↓ to select, Enter to apply). If the workspace agent is running, the model switches immediately; otherwise the selection is saved for next `/agent start`.
+
 Use `/theme` to open the theme picker (↑/↓ to select, Enter to apply). Theme selection persists across restarts.
 
 `/pr create` requires GitHub CLI auth (`gh auth login`) and is blocked if required merge checklist items are incomplete. Use `/pr status`, `/pr checks`, and `/pr merge` for full PR lifecycle in-app.
@@ -96,7 +99,7 @@ Use `/theme` to open the theme picker (↑/↓ to select, Enter to apply). Theme
 - `Ctrl+1` focus workspace tree
 - `Ctrl+2` focus workspace tree (alias)
 - `Ctrl+3` focus composer
-- `Tab` cycle focus
+- `Tab` in composer toggles Plan/Build send mode (falls back to focus cycling outside composer)
 - `Ctrl+Left` collapse/expand left sidebar
 - `Ctrl+Right` collapse/expand right sidebar
 - `F5` refresh repo/workspace state
@@ -108,7 +111,7 @@ Use `/theme` to open the theme picker (↑/↓ to select, Enter to apply). Theme
 - Click repo rows in the workspace tree to expand/collapse nested workspaces
 - Diff review opens as a modal overlay with mouse controls: click `Mode`, `Close`, `◀/▶ File`, and `◀/▶ Hunk` buttons
 - Optional keyboard shortcuts in diff review (when focus is not in composer): `Esc` or `q` close review, `m` toggle unified/split, `n`/`p` next/prev file
-- `Esc` closes command/help and create-workspace modals
+- `Esc` closes command/help, theme/model, and create-workspace modals
 
 ## Configuration
 

@@ -25,6 +25,7 @@ describe("buildHelpMarkdown", () => {
     const markdown = buildHelpMarkdown()
     expect(markdown).toContain("## Commands")
     expect(markdown).toContain("`/help`")
+    expect(markdown).toContain("`/model`")
     expect(markdown).toContain("`/theme`")
     expect(markdown).toContain("autocomplete")
   })
