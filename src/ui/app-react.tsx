@@ -4586,6 +4586,8 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                         return null
                       }
 
+                      const previousParsed = parseWorkspaceTreeValue(snapshot.workspaceTreeOptions[index - 1]?.value)
+                      const nextParsed = parseWorkspaceTreeValue(snapshot.workspaceTreeOptions[index + 1]?.value)
                       const treeSelected = index === snapshot.workspaceTreeSelectedIndex
                       const isRepoRow = parsed.type === "repo"
 
@@ -4677,12 +4679,20 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                           : colors.inputBackground
                       const workspaceFg = workspaceActive || treeSelected ? colors.selectedText : colors.textSecondary
                       const workspaceHovered = hoveredWorkspaceId === parsed.workspaceId
+                      const hasPrevWorkspaceSibling =
+                        previousParsed?.type === "workspace" && previousParsed.repoId === parsed.repoId
+                      const hasNextWorkspaceSibling = nextParsed?.type === "workspace" && nextParsed.repoId === parsed.repoId
+                      const showTopConnector = !hasPrevWorkspaceSibling
+                      const nameConnector = hasNextWorkspaceSibling ? "├─ " : "└─ "
+                      const statusPrefix = hasNextWorkspaceSibling ? "│  " : "   "
+                      const separatorConnector = hasNextWorkspaceSibling ? "│" : " "
+                      const workspaceRowHeight = showTopConnector ? 4 : 3
 
                       return (
                         <box
                           key={value}
                           id={`pc-workspace-tree-row-${index}`}
-                          height={2}
+                          height={workspaceRowHeight}
                           backgroundColor={workspaceBg}
                           onMouseMove={() => {
                             if (hoveredWorkspaceId !== parsed.workspaceId) {
@@ -4698,11 +4708,32 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                           style={{
                             flexDirection: "column",
                             flexShrink: 0,
-                            marginBottom: 1,
-                            paddingLeft: 2,
+                            marginBottom: 0,
+                            paddingLeft: 1,
                             paddingRight: 1,
                           }}
                         >
+                          {showTopConnector ? (
+                            <box
+                              id={`pc-workspace-tree-row-connector-top-${index}`}
+                              height={1}
+                              style={{
+                                flexDirection: "row",
+                                alignItems: "center",
+                              }}
+                            >
+                              <text
+                                content="│"
+                                fg={colors.textMuted}
+                                wrapMode="none"
+                                selectable={false}
+                                style={{
+                                  flexShrink: 0,
+                                }}
+                              />
+                            </box>
+                          ) : null}
+
                           <box
                             id={`pc-workspace-tree-row-top-${index}`}
                             height={1}
@@ -4711,6 +4742,16 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                               alignItems: "center",
                             }}
                           >
+                            <text
+                              id={`pc-workspace-tree-row-name-prefix-${index}`}
+                              content={nameConnector}
+                              fg={colors.textMuted}
+                              wrapMode="none"
+                              selectable={false}
+                              style={{
+                                flexShrink: 0,
+                              }}
+                            />
                             <text
                               id={`pc-workspace-tree-row-name-${index}`}
                               content={option.name}
@@ -4731,6 +4772,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                                 style={{
                                   flexShrink: 0,
                                   marginLeft: 1,
+                                  marginRight: 1,
                                 }}
                               >
                                 <text content="[-]" fg={colors.error} wrapMode="none" selectable={false} />
@@ -4759,8 +4801,18 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                             }}
                           >
                             <text
-                              id={`pc-workspace-tree-row-status-dot-${index}`}
-                              content="· "
+                              id={`pc-workspace-tree-row-status-prefix-${index}`}
+                              content={statusPrefix}
+                              fg={colors.textMuted}
+                              wrapMode="none"
+                              selectable={false}
+                              style={{
+                                flexShrink: 0,
+                              }}
+                            />
+                            <text
+                              id={`pc-workspace-tree-row-status-star-${index}`}
+                              content="* "
                               fg={colors.textMuted}
                               wrapMode="none"
                               selectable={false}
@@ -4791,6 +4843,25 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                                 }}
                               />
                             ) : null}
+                          </box>
+
+                          <box
+                            id={`pc-workspace-tree-row-separator-${index}`}
+                            height={1}
+                            style={{
+                              flexDirection: "row",
+                              alignItems: "center",
+                            }}
+                          >
+                            <text
+                              content={separatorConnector}
+                              fg={colors.textMuted}
+                              wrapMode="none"
+                              selectable={false}
+                              style={{
+                                flexShrink: 0,
+                              }}
+                            />
                           </box>
                         </box>
                       )
