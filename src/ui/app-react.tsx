@@ -879,6 +879,7 @@ export class PiConductorApp {
     } else {
       this.rebuildWorkspaceTreeOptions()
     }
+    this.refreshWorkspacePrViewOnSelectionChange(workspace)
     this.refreshStatusPanel()
     this.refreshDiffPanel()
     this.refreshLogsPanel()
@@ -1354,6 +1355,7 @@ export class PiConductorApp {
             this.selectedWorkspaceId = workspace.id
             this.reloadRepos(workspace.repoId)
             this.reloadWorkspaces(workspace.id)
+            this.refreshWorkspacePrViewOnSelectionChange(workspace)
             this.appendGlobalLog(`Restored workspace using existing worktree: ${workspace.name}`)
             return
           }
@@ -1379,6 +1381,7 @@ export class PiConductorApp {
           this.selectedWorkspaceId = workspace.id
           this.reloadRepos(workspace.repoId)
           this.reloadWorkspaces(workspace.id)
+          this.refreshWorkspacePrViewOnSelectionChange(workspace)
           this.appendGlobalLog(`Restored workspace: ${workspace.name}`)
           return
         }
@@ -1401,6 +1404,7 @@ export class PiConductorApp {
 
           this.selectedWorkspaceId = workspace.id
           this.reloadWorkspaces(workspace.id)
+          this.refreshWorkspacePrViewOnSelectionChange(workspace)
           this.appendGlobalLog(`Selected workspace: ${workspace.name}`)
           return
         }
@@ -1512,6 +1516,13 @@ export class PiConductorApp {
           if (create.status !== 0) {
             if (prUrl) {
               this.appendWorkspaceLog(workspace.id, `[pr] pull request already exists: ${prUrl}`)
+              const existingPr = this.fetchWorkspacePrView(workspace, {
+                logWhenMissing: false,
+                logWhenError: false,
+              })
+              if (existingPr) {
+                this.openWorkspacePrModal(workspace, "Pull request", existingPr)
+              }
             } else {
               this.appendWorkspaceLog(workspace.id, `[pr] create failed:\n${output || "unknown error"}`)
             }
@@ -1886,7 +1897,7 @@ export class PiConductorApp {
 
   private fetchWorkspacePrView(
     workspace: WorkspaceRecord,
-    options: { logWhenMissing?: boolean } = {},
+    options: { logWhenMissing?: boolean; logWhenError?: boolean } = {},
   ): PrViewRecord | null {
     const result = this.runCommand(
       "gh",
@@ -1912,18 +1923,33 @@ export class PiConductorApp {
         return null
       }
 
-      this.appendWorkspaceLog(workspace.id, `[pr] failed to query pull request:\n${detail || "unknown error"}`)
+      if (options.logWhenError !== false) {
+        this.appendWorkspaceLog(workspace.id, `[pr] failed to query pull request:\n${detail || "unknown error"}`)
+      }
       return null
     }
 
     const parsed = parsePrViewJson(result.stdout)
     if (!parsed) {
-      this.appendWorkspaceLog(workspace.id, "[pr] failed to parse `gh pr view` output.")
+      if (options.logWhenError !== false) {
+        this.appendWorkspaceLog(workspace.id, "[pr] failed to parse `gh pr view` output.")
+      }
       return null
     }
 
     this.prViewByWorkspace.set(workspace.id, parsed)
     return parsed
+  }
+
+  private refreshWorkspacePrViewOnSelectionChange(workspace: WorkspaceRecord | null) {
+    if (!workspace) {
+      return
+    }
+
+    this.fetchWorkspacePrView(workspace, {
+      logWhenMissing: false,
+      logWhenError: false,
+    })
   }
 
   private openWorkspacePrModal(workspace: WorkspaceRecord, title: string, view: PrViewRecord) {
@@ -2930,6 +2956,7 @@ export class PiConductorApp {
         this.workspaceOptions.findIndex((it) => Number(it.value) === parsed.workspaceId),
       )
       this.rebuildWorkspaceTreeOptions(workspaceTreeValue(parsed.repoId, parsed.workspaceId))
+      this.refreshWorkspacePrViewOnSelectionChange(this.store.getWorkspaceById(parsed.workspaceId))
     }
 
     this.refreshStatusPanel()
