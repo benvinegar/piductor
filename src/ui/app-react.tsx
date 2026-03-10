@@ -5256,9 +5256,11 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                 }}
                 keyBindings={[
                   { name: "return", action: "submit" },
-                  { name: "linefeed", action: "submit" },
                   { name: "return", shift: true, action: "newline" },
+                  // Keep linefeed as newline so Ctrl+J (often emitted as \n) inserts a new line.
+                  { name: "linefeed", action: "newline" },
                   { name: "linefeed", shift: true, action: "newline" },
+                  { name: "linefeed", ctrl: true, action: "newline" },
                   { name: "j", ctrl: true, action: "newline" },
                 ]}
                 textColor={colors.inputText}
