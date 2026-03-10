@@ -2,6 +2,13 @@
 
 Piductor is a terminal-native control plane for teams running Pi coding agents across git workspaces and PR branches.
 
+[![GitHub stars](https://img.shields.io/github/stars/benvinegar/piductor?style=flat-square)](https://github.com/benvinegar/piductor/stargazers)
+[![GitHub issues](https://img.shields.io/github/issues/benvinegar/piductor?style=flat-square)](https://github.com/benvinegar/piductor/issues)
+[![GitHub pull requests](https://img.shields.io/github/issues-pr/benvinegar/piductor?style=flat-square)](https://github.com/benvinegar/piductor/pulls)
+[![Built with Bun](https://img.shields.io/badge/Built%20with-Bun-f472b6?style=flat-square&logo=bun&logoColor=white)](https://bun.sh)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.8-3178C6?style=flat-square&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat-square)](https://github.com/benvinegar/piductor/pulls)
+
 ## Why Piductor
 
 - **Parallel branch execution**: run one agent per `git worktree` workspace.
