@@ -43,6 +43,7 @@ import {
 } from "../workspace/tree"
 import { parseWorkspaceArchiveArgs, workspaceArchiveUsage } from "../workspace/archive"
 import { parseWorkspaceNewArgs, suggestWorkspaceNameFromBranch, workspaceNewUsage } from "../workspace/new"
+import { formatWorkspaceNameWithSummary, generateWorkspaceNameSummary } from "../workspace/name-summary"
 import {
   extractFirstUrl,
   parsePrCreateArgs,
@@ -454,6 +455,8 @@ export class PiConductorApp {
   private readonly lastActivityByWorkspace = new Map<number, string>()
   private readonly lastTestRunByWorkspace = new Map<number, TestRunState>()
   private readonly runtimeStateByWorkspace = new Map<number, WorkspaceRuntimeStateRecord>()
+  private readonly workspaceNameSummaryInFlight = new Set<number>()
+  private readonly workspaceNameSummaryAttempted = new Set<number>()
   private readonly uiFlushScheduler = new UiFlushScheduler(45, () => {
     this.refreshStatusPanel()
     this.refreshLogsPanel()
@@ -904,6 +907,75 @@ export class PiConductorApp {
     }
 
     return `${stem}-${Date.now().toString(36).slice(-4)}`
+  }
+
+  private workspaceDisplayName(workspace: WorkspaceRecord): string {
+    const summary = this.getWorkspaceRuntimeState(workspace.id).workspaceNameSummary
+    return formatWorkspaceNameWithSummary(workspace.name, summary)
+  }
+
+  private maybeGenerateWorkspaceNameSummary(workspace: WorkspaceRecord, taskText: string) {
+    const runtime = this.getWorkspaceRuntimeState(workspace.id)
+    if (
+      runtime.workspaceNameSummary ||
+      this.workspaceNameSummaryInFlight.has(workspace.id) ||
+      this.workspaceNameSummaryAttempted.has(workspace.id)
+    ) {
+      return
+    }
+
+    const trimmed = taskText.trim()
+    if (trimmed.length < 8) {
+      return
+    }
+
+    this.workspaceNameSummaryAttempted.add(workspace.id)
+    this.workspaceNameSummaryInFlight.add(workspace.id)
+    void this.generateWorkspaceNameSummaryForWorkspace(workspace, trimmed)
+  }
+
+  private async generateWorkspaceNameSummaryForWorkspace(workspace: WorkspaceRecord, taskText: string) {
+    try {
+      const preferredModel = this.store.getAgent(workspace.id)?.model ?? this.config.defaultModel
+      const summary = await generateWorkspaceNameSummary({
+        piCommand: this.config.piCommand,
+        cwd: workspace.worktreePath,
+        model: preferredModel ?? undefined,
+        taskText,
+      })
+
+      if (!summary) {
+        return
+      }
+
+      const runtime = this.getWorkspaceRuntimeState(workspace.id)
+      if (runtime.workspaceNameSummary === summary) {
+        return
+      }
+
+      this.setWorkspaceRuntimeState(workspace.id, { workspaceNameSummary: summary })
+
+      const runningAgent = this.agentByWorkspace.get(workspace.id)
+      if (runningAgent) {
+        try {
+          await runningAgent.setSessionName(this.workspaceDisplayName(workspace))
+        } catch {
+          // Ignore session-name failures.
+        }
+      }
+
+      if (this.selectedRepoId === workspace.repoId) {
+        this.reloadWorkspaces(this.selectedWorkspaceId)
+      } else {
+        this.rebuildWorkspaceTreeOptions(this.workspaceTreeValueForSelection())
+      }
+      this.refreshStatusPanel()
+      this.emitSnapshot()
+    } catch {
+      // Ignore summary-generation failures.
+    } finally {
+      this.workspaceNameSummaryInFlight.delete(workspace.id)
+    }
   }
 
   public toggleRepoExpanded(repoId: number) {
@@ -2102,10 +2174,15 @@ export class PiConductorApp {
 
     this.appendWorkspaceLog(workspace.id, `[you/${sendMode}] ${message}`)
     const runtime = this.getWorkspaceRuntimeState(workspace.id)
+    const shouldGenerateWorkspaceNameSummary = sendMode === "prompt" && !runtime.workspaceNameSummary
     this.setWorkspaceRuntimeState(workspace.id, {
       sendMode,
       userMessages: runtime.userMessages + 1,
     })
+
+    if (shouldGenerateWorkspaceNameSummary) {
+      this.maybeGenerateWorkspaceNameSummary(workspace, message)
+    }
 
     if (!agent) {
       await this.startAgent(workspace.id, this.config.defaultModel)
@@ -2205,7 +2282,7 @@ export class PiConductorApp {
         }
       }
 
-      await agent.setSessionName(workspace.name)
+      await agent.setSessionName(this.workspaceDisplayName(workspace))
 
       const state = await agent.getState()
       const sessionFile =
@@ -2795,7 +2872,7 @@ export class PiConductorApp {
           name: formatWorkspaceTreeRowName({
             isRepo: false,
             repoId: repo.id,
-            workspaceName: workspace.name,
+            workspaceName: this.workspaceDisplayName(workspace),
             branch: workspace.branch,
             added,
             removed,
@@ -2911,7 +2988,7 @@ export class PiConductorApp {
       }
 
       return {
-        name: `${workspace.id} · ${workspace.name}`,
+        name: `${workspace.id} · ${this.workspaceDisplayName(workspace)}`,
         description: `${workspace.branch} · ${status} · ${changed} files changed`,
         value: workspace.id,
       }
@@ -3356,6 +3433,7 @@ export class PiConductorApp {
       workspaceId,
       sendMode: null,
       sessionFile: null,
+      workspaceNameSummary: null,
       turnCount: 0,
       toolCallCount: 0,
       lastTurnAt: null,
@@ -3385,6 +3463,7 @@ export class PiConductorApp {
       workspaceId,
       sendMode: next.sendMode,
       sessionFile: next.sessionFile,
+      workspaceNameSummary: next.workspaceNameSummary,
       turnCount: next.turnCount,
       toolCallCount: next.toolCallCount,
       lastTurnAt: next.lastTurnAt,
@@ -3441,7 +3520,7 @@ export class PiConductorApp {
     for (const agent of agents) {
       const workspace = this.store.getWorkspaceById(agent.workspaceId)
       const repo = workspace ? this.store.getRepoById(workspace.repoId) : null
-      const label = workspace ? `${repo?.name ?? "repo"}/${workspace.name}` : `workspace#${agent.workspaceId}`
+      const label = workspace ? `${repo?.name ?? "repo"}/${this.workspaceDisplayName(workspace)}` : `workspace#${agent.workspaceId}`
       const lastEvent = agent.lastEventAt ?? "-"
       const started = agent.startedAt ?? "-"
 
@@ -3614,15 +3693,16 @@ export class PiConductorApp {
     this.agentBusy = shouldShowAgentSpinner
 
     const activeSendMode = this.getActiveSendMode()
+    const workspaceLabel = workspace ? this.workspaceDisplayName(workspace) : null
 
     this.headerText = workspace
-      ? `${repo?.name ?? "repo"}/${workspace.name} · ${workspace.branch} · mode=${activeSendMode} · ${readinessLabel}`
+      ? `${repo?.name ?? "repo"}/${workspaceLabel} · ${workspace.branch} · mode=${activeSendMode} · ${readinessLabel}`
       : `Piductor · select a repo/workspace · mode=${activeSendMode}`
 
     const activityTime = agent?.lastEventAt ?? agent?.startedAt ?? agent?.stoppedAt ?? "<none>"
     const statusLines = [
       `repo       ${repo ? `${repo.name} (#${repo.id})` : "<none>"}`,
-      `workspace  ${workspace ? `${workspace.name} (#${workspace.id})` : "<none>"}`,
+      `workspace  ${workspace ? `${workspaceLabel} (#${workspace.id})` : "<none>"}`,
       `branch     ${workspace?.branch ?? "<none>"}`,
       `agent      ${agentStatusLabel}${agent?.pid ? ` (pid ${agent.pid})` : ""}`,
       `activity   ${activityTime}`,

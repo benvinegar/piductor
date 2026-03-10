@@ -46,6 +46,7 @@ export interface WorkspaceRuntimeStateRecord {
   workspaceId: number
   sendMode: SendMode | null
   sessionFile: string | null
+  workspaceNameSummary: string | null
   turnCount: number
   toolCallCount: number
   lastTurnAt: string | null

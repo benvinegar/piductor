@@ -73,6 +73,7 @@ function mapWorkspaceRuntimeState(row: any): WorkspaceRuntimeStateRecord {
     workspaceId: Number(row.workspace_id),
     sendMode,
     sessionFile: row.session_file ? String(row.session_file) : null,
+    workspaceNameSummary: row.workspace_name_summary ? String(row.workspace_name_summary) : null,
     turnCount: Number(row.turn_count ?? 0),
     toolCallCount: Number(row.tool_call_count ?? 0),
     lastTurnAt: row.last_turn_at ? String(row.last_turn_at) : null,
@@ -187,6 +188,7 @@ export class Store {
         workspace_id INTEGER PRIMARY KEY,
         send_mode TEXT,
         session_file TEXT,
+        workspace_name_summary TEXT,
         turn_count INTEGER NOT NULL DEFAULT 0,
         tool_call_count INTEGER NOT NULL DEFAULT 0,
         last_turn_at TEXT,
@@ -219,6 +221,11 @@ export class Store {
     const hasSessionFile = runtimeColumns.some((column) => String(column.name) === "session_file")
     if (!hasSessionFile) {
       this.db.exec(`ALTER TABLE workspace_runtime_state ADD COLUMN session_file TEXT`)
+    }
+
+    const hasWorkspaceNameSummary = runtimeColumns.some((column) => String(column.name) === "workspace_name_summary")
+    if (!hasWorkspaceNameSummary) {
+      this.db.exec(`ALTER TABLE workspace_runtime_state ADD COLUMN workspace_name_summary TEXT`)
     }
 
     const appStateColumns = this.db.query(`PRAGMA table_info(app_state)`).all() as Array<{ name: string }>
@@ -528,7 +535,8 @@ export class Store {
   getWorkspaceRuntimeState(workspaceId: number): WorkspaceRuntimeStateRecord | null {
     const row = this.db
       .query(`
-        SELECT workspace_id, send_mode, session_file, turn_count, tool_call_count, last_turn_at,
+        SELECT workspace_id, send_mode, session_file, workspace_name_summary,
+               turn_count, tool_call_count, last_turn_at,
                user_messages, assistant_messages, session_tool_calls,
                tokens_total, cost_total, updated_at
         FROM workspace_runtime_state
@@ -542,7 +550,8 @@ export class Store {
   listWorkspaceRuntimeStates(): WorkspaceRuntimeStateRecord[] {
     const rows = this.db
       .query(`
-        SELECT workspace_id, send_mode, session_file, turn_count, tool_call_count, last_turn_at,
+        SELECT workspace_id, send_mode, session_file, workspace_name_summary,
+               turn_count, tool_call_count, last_turn_at,
                user_messages, assistant_messages, session_tool_calls,
                tokens_total, cost_total, updated_at
         FROM workspace_runtime_state
@@ -557,6 +566,7 @@ export class Store {
     workspaceId: number
     sendMode: SendMode | null
     sessionFile: string | null
+    workspaceNameSummary: string | null
     turnCount: number
     toolCallCount: number
     lastTurnAt: string | null
@@ -571,14 +581,16 @@ export class Store {
     this.db
       .query(`
         INSERT INTO workspace_runtime_state(
-          workspace_id, send_mode, session_file, turn_count, tool_call_count, last_turn_at,
+          workspace_id, send_mode, session_file, workspace_name_summary,
+          turn_count, tool_call_count, last_turn_at,
           user_messages, assistant_messages, session_tool_calls,
           tokens_total, cost_total, updated_at
         )
-        VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(workspace_id) DO UPDATE SET
           send_mode = excluded.send_mode,
           session_file = excluded.session_file,
+          workspace_name_summary = excluded.workspace_name_summary,
           turn_count = excluded.turn_count,
           tool_call_count = excluded.tool_call_count,
           last_turn_at = excluded.last_turn_at,
@@ -593,6 +605,7 @@ export class Store {
         params.workspaceId,
         params.sendMode,
         params.sessionFile,
+        params.workspaceNameSummary,
         params.turnCount,
         params.toolCallCount,
         params.lastTurnAt,
