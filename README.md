@@ -1,134 +1,87 @@
 # Piductor
 
-Terminal-native orchestration for parallel Pi coding agents across git workspaces.
+Piductor is a terminal-native control plane for teams running Pi coding agents across git workspaces and PR branches.
 
-Built with:
-- `@opentui/core`
-- `@opentui/react`
-- Bun + TypeScript
-- SQLite (`bun:sqlite`)
+## Why Piductor
 
-## What it does
-
-- Register repos (local path or remote git URL)
-- Create isolated workspaces via `git worktree` (from `HEAD`, a base ref, or an existing branch)
-- Start one Pi RPC agent per workspace
-- Send agent messages in `prompt`, `steer`, or `follow_up` mode
-- Stream assistant output into a chat-style markdown transcript
-- Resume prior workspace sessions after app restart (conversation replay + runtime state)
-- Always start in a lobby/splash screen with no active workspace selected
-- Open a local project from the lobby via an inline button + path modal
-- Surface thinking/tool/status events in a persistent Codex-like timeline (no disappearing action trail)
-- Run setup/run/archive scripts per workspace
-- Archive and restore workspaces
-- Show per-file change stats (`+/-`) in a review panel against `main` (branch diff view)
-- Collapse sidebars, resize side columns with mouse drag, and collapse sidebar sections
-- Switch between 5 built-in UI themes (`/theme`) and available agent models (`/model`) via picker modals
-- Navigate a unified workspace tree grouped by project (`project -> workspaces`) with caret toggles, `[+]` quick-create workspace actions, and persisted collapse/expand state
+- **Parallel branch execution**: run one agent per `git worktree` workspace.
+- **PR-oriented review**: Changes panel shows branch diff against `main`, not just uncommitted files.
+- **Single surface area**: manage repo setup, agent runs, tests, diffs, checklists, and PR actions in one TUI.
+- **Persistent sessions**: keep workspace runtime state, conversation history, selected model, and send mode across restarts.
+- **Mouse-first UX**: desktop-style terminal layout with collapsible sidebars, modal pickers, and tree navigation.
 
 ## Install
 
+### Prerequisites
+
+- [Bun](https://bun.sh/)
+- `git`
+- `pi` CLI available on `PATH` (used in RPC mode)
+- Optional: [`gh`](https://cli.github.com/) for `/pr ...` commands
+
+### From source
+
 ```bash
+git clone https://github.com/benvinegar/piductor.git
+cd piductor
 bun install
 ```
 
-## Run
+## Quick start
 
 ```bash
 bun run dev
 ```
 
-If Bun is missing in your shell, load your profile first:
+Then inside the app:
 
-```bash
-source ~/.bash_profile
-bun run dev
-```
+1. On the splash screen, click **Open project** and provide a local repo path.
+2. Expand the project in the left tree and click **[+]** to create a workspace.
+3. Select a workspace row.
+4. Run `/agent start` and send a prompt.
+5. Use the right-side **Changes** panel to review branch diffs before opening a PR.
 
-## In-app commands
+## Typical workflow
+
+1. Add/select a project.
+2. Create a workspace branch (`/workspace new ...`).
+3. Start an agent (`/agent start`) and iterate in chat.
+4. Run checks (`/test`, `/run`).
+5. Review branch changes and checklist status.
+6. Open and manage PRs with `/pr create`, `/pr status`, `/pr checks`, `/pr merge`.
+
+> PR commands require `gh auth login` in your shell.
+
+## Common commands
+
+Use `/help` in-app for the full command catalog.
 
 ```text
-/help
 /repo add <local-path|git-url> [name]
 /repo select <id|name>
 /workspace new <name> [baseRef]
 /workspace new --branch <branch> [name]
-/workspace branches
 /workspace select <id|name>
-/workspace archive [--force]
-/workspace archived
-/workspace restore <id|name>
 /agent start [model]
 /agent stop
-/mode <prompt|steer|follow_up>
 /model
 /theme
+/test [command]
+/checklist [show]
 /pr create [--dry-run]
 /pr status
 /pr checks
 /pr merge [--merge|--squash|--rebase] [--delete-branch] [--dry-run]
-/run [command]
-/run setup
-/run archive
-/run stop
-/run mode [concurrent|nonconcurrent]
-/test [command]
-/status
-/checklist [show]
-/checklist add <label>
-/checklist done <key|label>
-/checklist undone <key|label>
-/checklist remove <key|label>
-/checklist clear
-/diff [open|close|next|prev|mode [unified|split]|refresh]
-/ui left|right|toggle
 ```
-
-Plain text input sends a message to the selected workspace agent using the current mode.
-
-`/help` opens a modal command reference.
-
-Type `/` in the composer to open command autocomplete (mouse-select or `Tab` to apply a suggestion).
-
-Use `/model` to open the model picker (↑/↓ to select, Enter to apply). If the workspace agent is running, the model switches immediately; otherwise the selection is saved for next `/agent start`.
-
-Use `/theme` to open the theme picker (↑/↓ to select, Enter to apply). Theme selection persists across restarts.
-
-`/pr create` requires GitHub CLI auth (`gh auth login`) and is blocked if required merge checklist items are incomplete. Use `/pr status`, `/pr checks`, and `/pr merge` for full PR lifecycle in-app.
-
-## Keyboard + mouse controls
-
-- `Ctrl+1` focus workspace tree
-- `Ctrl+2` focus workspace tree (alias)
-- `Ctrl+3` focus composer
-- Composer: `Enter` sends, `Shift+Enter` inserts newline, `Ctrl+J` inserts newline
-- `Tab` in composer toggles Plan/Build send mode (falls back to focus cycling outside composer)
-- `Ctrl+Left` collapse/expand left sidebar
-- `Ctrl+Right` collapse/expand right sidebar
-- `F5` refresh repo/workspace state
-- `Ctrl+L` clear visible logs/run output
-- `Ctrl+C` exit
-- Click top-bar `[+] / [-]` toggles to collapse sidebars
-- From the lobby splash, click `Open project` to add a local repo path
-- Drag vertical separators to resize left/right columns
-- Click sidebar section headers to collapse/expand workspace tree, status, changes, and run terminal
-- Click repo rows in the workspace tree to expand/collapse nested workspaces
-- Diff review opens as a modal overlay with mouse controls: click `Mode`, `Close`, `◀/▶ File`, and `◀/▶ Hunk` buttons
-- Optional keyboard shortcuts in diff review (when focus is not in composer): `Esc` or `q` close review, `m` toggle unified/split, `n`/`p` next/prev file
-- `Esc` closes command/help, theme/model, and create-workspace modals
 
 ## Configuration
 
-Config files are optional and merged in this order:
+Piductor merges config from:
 
-1. User: `~/.config/piductor/config.json`
-2. Project: `./piductor.json`
+1. `~/.config/piductor/config.json`
+2. `./piductor.json` (project-local override)
 
-Project config overrides user config.
-
-Legacy `piconductor` config/data paths are still detected for backward compatibility.
-
-### Example
+Example:
 
 ```json
 {
@@ -144,47 +97,52 @@ Legacy `piconductor` config/data paths are still detected for backward compatibi
 }
 ```
 
-### Script environment variables
+Default local data directory: `./.piductor`.
 
-Setup/run/archive scripts receive these vars:
+## Architecture
 
-- `PIDUCTOR_WORKSPACE_NAME`
-- `PIDUCTOR_WORKSPACE_PATH`
-- `PIDUCTOR_ROOT_PATH`
-- `PIDUCTOR_DEFAULT_BRANCH`
-- `PIDUCTOR_PORT` (base of a 10-port range for the workspace)
-
-Compatibility aliases are also provided with `CONDUCTOR_*` names.
-
-### Default storage paths
-
-- `dataDir`: `./.piductor`
-- `reposDir`: `./.piductor/repos`
-- `workspacesDir`: `./.piductor/workspaces`
-- `dbPath`: `./.piductor/piductor.sqlite`
-
-## Project structure
-
-- `src/main.ts` — app entrypoint + signal handling
-- `src/ui/` — OpenTUI React view/controller shell (`app-react.tsx`, loading, rendering helpers)
-- `src/agent/` — agent lifecycle/control/state helpers
-- `src/network/` — Pi RPC transport + stderr filtering
-- `src/run/` — run/test command policy, logs, stream buffering, script env
-- `src/review/` — diff parsing/fingerprinting helpers
-- `src/workspace/` — workspace tree, new-workspace args, session/readiness logic
-- `src/vcs/` — git/worktree and PR command helpers
-- `src/core/` — config, DB, shared types
+- `src/ui/` — OpenTUI React app shell, renderer, interaction logic
+- `src/agent/` — agent lifecycle and reconnect handling
+- `src/network/` — Pi RPC transport
+- `src/vcs/` — git/worktree and PR helpers
+- `src/workspace/` — workspace tree/readiness/session logic
+- `src/core/` — config, persistence, shared types
 
 ## Development
 
-Typecheck:
-
 ```bash
 npx tsc --noEmit
+npm test --silent
 ```
 
-Run tests:
+For UI changes, verify behavior in a live tmux session before merging.
 
-```bash
-npm test
-```
+## Docs
+
+- Contributor automation guidance: [agents.md](agents.md)
+- Validation notes: [docs/m3-validation-pack.md](docs/m3-validation-pack.md)
+- Runtime command reference: `/help` inside the app
+
+## Contributing
+
+- Open an issue describing bugs, UX gaps, or feature proposals.
+- Keep PRs focused and include before/after context for UI changes.
+- Run typecheck and tests before submitting.
+- If command behavior changes, update code + tests + README together.
+
+## Security
+
+Please do **not** report vulnerabilities in public issues.
+
+Use GitHub private vulnerability reporting:
+
+- https://github.com/benvinegar/piductor/security/advisories/new
+
+## License
+
+This repository does not currently include a `LICENSE` file.
+
+## Community / support
+
+- Issues: https://github.com/benvinegar/piductor/issues
+- Pull requests: https://github.com/benvinegar/piductor/pulls
