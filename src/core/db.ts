@@ -85,6 +85,32 @@ function mapWorkspaceRuntimeState(row: any): WorkspaceRuntimeStateRecord {
   }
 }
 
+function parseRepoIdList(raw: unknown): number[] | null {
+  if (raw === null || raw === undefined) {
+    return null
+  }
+
+  const text = String(raw).trim()
+  if (!text) {
+    return []
+  }
+
+  try {
+    const parsed = JSON.parse(text)
+    if (!Array.isArray(parsed)) {
+      return null
+    }
+
+    const ids = parsed
+      .map((value) => Number(value))
+      .filter((value) => Number.isInteger(value) && value > 0)
+
+    return [...new Set(ids)]
+  } catch {
+    return null
+  }
+}
+
 function mapAppState(row: any): AppStateRecord {
   const selectedRepoId = row.selected_repo_id === null || row.selected_repo_id === undefined ? null : Number(row.selected_repo_id)
   const selectedWorkspaceId =
@@ -94,6 +120,7 @@ function mapAppState(row: any): AppStateRecord {
     selectedRepoId: Number.isFinite(selectedRepoId ?? Number.NaN) ? selectedRepoId : null,
     selectedWorkspaceId: Number.isFinite(selectedWorkspaceId ?? Number.NaN) ? selectedWorkspaceId : null,
     themeKey: row.theme_key ? String(row.theme_key) : null,
+    collapsedRepoIds: parseRepoIdList(row.collapsed_repo_ids),
     updatedAt: String(row.updated_at),
   }
 }
@@ -177,6 +204,7 @@ export class Store {
         selected_repo_id INTEGER,
         selected_workspace_id INTEGER,
         theme_key TEXT,
+        collapsed_repo_ids TEXT,
         updated_at TEXT NOT NULL
       );
     `)
@@ -197,6 +225,11 @@ export class Store {
     const hasThemeKey = appStateColumns.some((column) => String(column.name) === "theme_key")
     if (!hasThemeKey) {
       this.db.exec(`ALTER TABLE app_state ADD COLUMN theme_key TEXT`)
+    }
+
+    const hasCollapsedRepoIds = appStateColumns.some((column) => String(column.name) === "collapsed_repo_ids")
+    if (!hasCollapsedRepoIds) {
+      this.db.exec(`ALTER TABLE app_state ADD COLUMN collapsed_repo_ids TEXT`)
     }
   }
 
@@ -582,7 +615,7 @@ export class Store {
   getAppState(): AppStateRecord | null {
     const row = this.db
       .query(`
-        SELECT selected_repo_id, selected_workspace_id, theme_key, updated_at
+        SELECT selected_repo_id, selected_workspace_id, theme_key, collapsed_repo_ids, updated_at
         FROM app_state
         WHERE singleton_key = 1
       `)
@@ -595,20 +628,30 @@ export class Store {
     selectedRepoId: number | null
     selectedWorkspaceId: number | null
     themeKey: string | null
+    collapsedRepoIds: number[] | null
   }): AppStateRecord {
     const now = nowIso()
+    const collapsedRepoIds = params.collapsedRepoIds
+      ? JSON.stringify(
+          [...params.collapsedRepoIds]
+            .map((value) => Number(value))
+            .filter((value) => Number.isInteger(value) && value > 0)
+            .sort((a, b) => a - b),
+        )
+      : null
 
     this.db
       .query(`
-        INSERT INTO app_state(singleton_key, selected_repo_id, selected_workspace_id, theme_key, updated_at)
-        VALUES(1, ?, ?, ?, ?)
+        INSERT INTO app_state(singleton_key, selected_repo_id, selected_workspace_id, theme_key, collapsed_repo_ids, updated_at)
+        VALUES(1, ?, ?, ?, ?, ?)
         ON CONFLICT(singleton_key) DO UPDATE SET
           selected_repo_id = excluded.selected_repo_id,
           selected_workspace_id = excluded.selected_workspace_id,
           theme_key = excluded.theme_key,
+          collapsed_repo_ids = excluded.collapsed_repo_ids,
           updated_at = excluded.updated_at
       `)
-      .run(params.selectedRepoId, params.selectedWorkspaceId, params.themeKey, now)
+      .run(params.selectedRepoId, params.selectedWorkspaceId, params.themeKey, collapsedRepoIds, now)
 
     const next = this.getAppState()
     if (!next) {

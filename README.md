@@ -24,7 +24,7 @@ Built with:
 - Show per-file change stats (`+/-`) in a review panel
 - Collapse sidebars, resize side columns with mouse drag, and collapse sidebar sections
 - Switch between 5 built-in UI themes (`/theme`) and available agent models (`/model`) via picker modals
-- Navigate a unified workspace tree grouped by project (`project -> workspaces`) with caret toggles and `[+]` quick-create workspace actions
+- Navigate a unified workspace tree grouped by project (`project -> workspaces`) with caret toggles, `[+]` quick-create workspace actions, and persisted collapse/expand state
 
 ## Install
 

@@ -552,6 +552,7 @@ export class PiConductorApp {
   private lastPersistedRepoId: number | null = null
   private lastPersistedWorkspaceId: number | null = null
   private lastPersistedThemeKey: ThemeKey = DEFAULT_THEME_KEY
+  private lastPersistedCollapsedRepoSignature = ""
 
   private constructor(renderer: CliRenderer, root: Root, config: AppConfig, store: Store) {
     this.renderer = renderer
@@ -700,11 +701,45 @@ export class PiConductorApp {
     }
   }
 
+  private collapsedRepoSignature(ids: number[] | null): string {
+    if (ids === null) {
+      return "<default>"
+    }
+
+    return [...new Set(ids)]
+      .map((value) => Number(value))
+      .filter((value) => Number.isInteger(value) && value > 0)
+      .sort((a, b) => a - b)
+      .join(",")
+  }
+
+  private getCollapsedRepoIdsForPersistence(): number[] {
+    return this.repos
+      .map((repo) => repo.id)
+      .filter((repoId) => !this.expandedRepoIds.has(repoId))
+      .sort((a, b) => a - b)
+  }
+
+  private applyExpandedRepoPreference(collapsedRepoIds: number[] | null) {
+    const collapsed = collapsedRepoIds ? new Set(collapsedRepoIds) : null
+    this.expandedRepoIds.clear()
+
+    for (const repo of this.repos) {
+      if (!collapsed || !collapsed.has(repo.id)) {
+        this.expandedRepoIds.add(repo.id)
+      }
+    }
+  }
+
   private persistAppStateIfChanged() {
+    const collapsedRepoIds = this.getCollapsedRepoIdsForPersistence()
+    const collapsedRepoSignature = this.collapsedRepoSignature(collapsedRepoIds)
+
     if (
       this.selectedRepoId === this.lastPersistedRepoId &&
       this.selectedWorkspaceId === this.lastPersistedWorkspaceId &&
-      this.themeKey === this.lastPersistedThemeKey
+      this.themeKey === this.lastPersistedThemeKey &&
+      collapsedRepoSignature === this.lastPersistedCollapsedRepoSignature
     ) {
       return
     }
@@ -713,18 +748,22 @@ export class PiConductorApp {
       selectedRepoId: this.selectedRepoId,
       selectedWorkspaceId: this.selectedWorkspaceId,
       themeKey: this.themeKey,
+      collapsedRepoIds,
     })
 
     this.lastPersistedRepoId = this.selectedRepoId
     this.lastPersistedWorkspaceId = this.selectedWorkspaceId
     this.lastPersistedThemeKey = this.themeKey
+    this.lastPersistedCollapsedRepoSignature = collapsedRepoSignature
   }
 
   private restoreSelectionFromAppState() {
     const state = this.store.getAppState()
     if (!state) {
       this.applyTheme()
+      this.applyExpandedRepoPreference(null)
       this.selectedWorkspaceId = null
+      this.rebuildWorkspaceTreeOptions(this.workspaceTreeValueForSelection())
       return
     }
 
@@ -737,13 +776,15 @@ export class PiConductorApp {
     this.lastPersistedRepoId = state.selectedRepoId
     this.lastPersistedWorkspaceId = null
     this.lastPersistedThemeKey = this.themeKey
+    this.lastPersistedCollapsedRepoSignature = this.collapsedRepoSignature(state.collapsedRepoIds)
+
+    this.applyExpandedRepoPreference(state.collapsedRepoIds)
 
     const hasPreferredRepo =
       state.selectedRepoId !== null && this.repos.some((repo) => repo.id === state.selectedRepoId)
 
     if (hasPreferredRepo) {
       this.selectedRepoId = state.selectedRepoId
-      this.expandedRepoIds.add(state.selectedRepoId as number)
       this.reloadRepos(state.selectedRepoId)
     }
 

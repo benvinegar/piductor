@@ -61,6 +61,7 @@ export interface AppStateRecord {
   selectedRepoId: number | null
   selectedWorkspaceId: number | null
   themeKey: string | null
+  collapsedRepoIds: number[] | null
   updatedAt: string
 }
 
