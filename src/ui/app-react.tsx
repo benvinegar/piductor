@@ -4010,6 +4010,30 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
     setFocusTarget(parsed?.type === "workspace" ? "input" : "workspace")
   }
 
+  const hoveredWorkspaceIdFromTarget = (targetId: string | undefined): number | null => {
+    if (!targetId) {
+      return null
+    }
+
+    const rowMatch = targetId.match(/^pc-workspace-tree-row(?:-[a-z]+(?:-[a-z]+)*)?-(\d+)$/)
+    if (!rowMatch) {
+      return null
+    }
+
+    const rowIndex = Number.parseInt(rowMatch[1] ?? "", 10)
+    if (!Number.isFinite(rowIndex)) {
+      return null
+    }
+
+    const option = snapshot.workspaceTreeOptions[rowIndex]
+    if (!option) {
+      return null
+    }
+
+    const parsed = parseWorkspaceTreeValue(option.value)
+    return parsed?.type === "workspace" ? parsed.workspaceId : null
+  }
+
   useEffect(() => {
     const composer = composerRef.current
     if (!composer) {
@@ -4506,6 +4530,11 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
         id="pc-body"
         shouldFill
         onMouseMove={(event) => {
+          const nextHoveredWorkspaceId = hoveredWorkspaceIdFromTarget(event.target?.id)
+          if (hoveredWorkspaceId !== nextHoveredWorkspaceId) {
+            setHoveredWorkspaceId(nextHoveredWorkspaceId)
+          }
+
           if (!resizeState) return
           event.preventDefault()
           dragResize(resizeState.edge, event.x)
@@ -4628,11 +4657,6 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                             id={`pc-workspace-tree-row-${index}`}
                             height={1}
                             backgroundColor={treeSelected ? colors.markdownCodeBackground : "transparent"}
-                            onMouseMove={() => {
-                              if (hoveredWorkspaceId !== null) {
-                                setHoveredWorkspaceId(null)
-                              }
-                            }}
                             style={{
                               flexDirection: "row",
                               alignItems: "center",
@@ -4721,11 +4745,6 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                           id={`pc-workspace-tree-row-${index}`}
                           height={workspaceRowHeight}
                           backgroundColor="transparent"
-                          onMouseMove={() => {
-                            if (hoveredWorkspaceId !== parsed.workspaceId) {
-                              setHoveredWorkspaceId(parsed.workspaceId)
-                            }
-                          }}
                           onMouseDown={(event) => {
                             event.preventDefault()
                             setWorkspaceTreeCollapsed(false)
@@ -4750,6 +4769,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                               }}
                             >
                               <text
+                                id={`pc-workspace-tree-row-connector-top-text-${index}`}
                                 content="│"
                                 fg={colors.textMuted}
                                 wrapMode="none"
@@ -4809,10 +4829,15 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                                   style={{
                                     flexShrink: 0,
                                     marginLeft: 1,
-                                    marginRight: 1,
                                   }}
                                 >
-                                  <text content="[-]" fg={colors.error} wrapMode="none" selectable={false} />
+                                  <text
+                                    id={`pc-workspace-tree-row-archive-text-${index}`}
+                                    content="[-]"
+                                    fg={colors.error}
+                                    wrapMode="none"
+                                    selectable={false}
+                                  />
                                 </box>
                               ) : (
                                 <text
@@ -4903,6 +4928,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                             }}
                           >
                             <text
+                              id={`pc-workspace-tree-row-separator-text-${index}`}
                               content={separatorConnector}
                               fg={colors.textMuted}
                               wrapMode="none"
