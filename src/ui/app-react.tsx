@@ -725,6 +725,7 @@ export class PiConductorApp {
     const state = this.store.getAppState()
     if (!state) {
       this.applyTheme()
+      this.selectedWorkspaceId = null
       return
     }
 
@@ -735,19 +736,8 @@ export class PiConductorApp {
     this.applyTheme()
 
     this.lastPersistedRepoId = state.selectedRepoId
-    this.lastPersistedWorkspaceId = state.selectedWorkspaceId
+    this.lastPersistedWorkspaceId = null
     this.lastPersistedThemeKey = this.themeKey
-
-    const preferredWorkspace =
-      state.selectedWorkspaceId !== null ? this.store.getWorkspaceById(state.selectedWorkspaceId) : null
-
-    if (preferredWorkspace && preferredWorkspace.status === "active") {
-      this.selectedRepoId = preferredWorkspace.repoId
-      this.expandedRepoIds.add(preferredWorkspace.repoId)
-      this.reloadRepos(preferredWorkspace.repoId)
-      this.reloadWorkspaces(preferredWorkspace.id)
-      return
-    }
 
     const hasPreferredRepo =
       state.selectedRepoId !== null && this.repos.some((repo) => repo.id === state.selectedRepoId)
@@ -756,8 +746,11 @@ export class PiConductorApp {
       this.selectedRepoId = state.selectedRepoId
       this.expandedRepoIds.add(state.selectedRepoId as number)
       this.reloadRepos(state.selectedRepoId)
-      this.reloadWorkspaces()
     }
+
+    this.reloadWorkspaces(null)
+    this.selectedWorkspaceId = null
+    this.rebuildWorkspaceTreeOptions(this.workspaceTreeValueForSelection())
   }
 
   private hydrateLogsFromPersistedSessions() {
@@ -875,7 +868,7 @@ export class PiConductorApp {
   public async createWorkspaceFromPath(inputPath: string): Promise<boolean> {
     const raw = inputPath.trim()
     if (!raw) {
-      this.appendGlobalLog("Path is required.")
+      this.appendGlobalLog("Project path is required.")
       this.refreshAllAndEmit()
       return false
     }
@@ -890,7 +883,7 @@ export class PiConductorApp {
       repoRoot = ensured.repoRoot
       repoName = ensured.repoName
     } catch (error) {
-      this.appendGlobalLog(`Invalid repo path: ${resolved}`)
+      this.appendGlobalLog(`Invalid project path: ${resolved}`)
       this.appendGlobalLog(`ERROR: ${safeErr(error)}`)
       this.refreshAllAndEmit()
       return false
@@ -902,31 +895,38 @@ export class PiConductorApp {
       this.expandedRepoIds.add(repo.id)
       this.reloadRepos(repo.id)
 
-      const baseRef = getDefaultBranchName(repo.rootPath)
-      const workspaceName = this.nextWorkspaceName(repo.id, suggestWorkspaceNameFromBranch(baseRef))
-      const created = createWorktree({
-        repoRoot: repo.rootPath,
-        workspacesDir: this.config.workspacesDir,
-        workspaceName,
-        baseRef,
-      })
+      let workspace = this.store.listWorkspaces(repo.id).sort((a, b) => a.id - b.id)[0] ?? null
 
-      const workspace = this.store.createWorkspace(repo.id, workspaceName, created.branch, created.worktreePath)
-      this.selectedWorkspaceId = workspace.id
-      this.reloadWorkspaces(workspace.id)
-      this.appendWorkspaceLog(
-        workspace.id,
-        `Workspace created at ${workspace.worktreePath} on branch ${workspace.branch} (base ${baseRef})`,
-      )
+      if (!workspace) {
+        const baseRef = getDefaultBranchName(repo.rootPath)
+        const workspaceName = this.nextWorkspaceName(repo.id, suggestWorkspaceNameFromBranch(baseRef))
+        const created = createWorktree({
+          repoRoot: repo.rootPath,
+          workspacesDir: this.config.workspacesDir,
+          workspaceName,
+          baseRef,
+        })
 
-      if (this.config.scripts.setup) {
-        void this.runConfiguredScript(workspace.id, "setup")
+        workspace = this.store.createWorkspace(repo.id, workspaceName, created.branch, created.worktreePath)
+        this.appendWorkspaceLog(
+          workspace.id,
+          `Workspace created at ${workspace.worktreePath} on branch ${workspace.branch} (base ${baseRef})`,
+        )
+
+        if (this.config.scripts.setup) {
+          void this.runConfiguredScript(workspace.id, "setup")
+        }
       }
+
+      this.selectedWorkspaceId = null
+      this.reloadWorkspaces(null)
+      this.rebuildWorkspaceTreeOptions(repoTreeValue(repo.id))
+      this.appendGlobalLog(`Opened project: ${repo.name} (${repo.rootPath})`)
 
       this.refreshAllAndEmit()
       return true
     } catch (error) {
-      this.appendGlobalLog(`Failed to create workspace from path: ${resolved}`)
+      this.appendGlobalLog(`Failed to open project from path: ${resolved}`)
       this.appendGlobalLog(`ERROR: ${safeErr(error)}`)
       this.refreshAllAndEmit()
       return false
@@ -2569,7 +2569,7 @@ export class PiConductorApp {
       this.selectedRepoId = repo.id
       this.appendGlobalLog(`Auto-added current repo: ${repoName}`)
     } catch {
-      this.appendGlobalLog("No git repo detected in current directory. Add one with /repo add ...")
+      this.appendGlobalLog("No git repo detected in current directory. Open one from the lobby or use /repo add ...")
     }
   }
 
@@ -3778,9 +3778,11 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
   const fillerLen = Math.max(1, headerWidth - truncatedTitle.length - headerActions.length - 2)
   const conversationHeaderText = `${truncatedTitle} ${"─".repeat(fillerLen)} ${headerActions}`
   const lobbySubtitle = "Select a workspace to continue"
+  const lobbyOpenProjectLabel = "Open project"
   const lobbyAsciiWidth = lobbyAscii.reduce((max, line) => Math.max(max, line.length), 0)
-  const lobbyContentWidth = Math.max(lobbyAsciiWidth, lobbySubtitle.length)
-  const lobbyContentHeight = lobbyAscii.length + 2
+  const lobbyButtonWidth = lobbyOpenProjectLabel.length + 6
+  const lobbyContentWidth = Math.max(lobbyAsciiWidth, lobbySubtitle.length, lobbyButtonWidth)
+  const lobbyContentHeight = lobbyAscii.length + 7
   const lobbyHorizontalNudge = Math.floor((leftVisible ? leftColumnWidth + 1 : 0) / 2)
 
   const hasLoadingToken = snapshot.agentBusy
@@ -4034,7 +4036,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
 
     setCreateWorkspaceModalVisible(false)
     createPathRef.current?.clear()
-    setFocusTarget("input")
+    setFocusTarget("workspace")
   }
 
   useKeyboard((key: KeyEvent) => {
@@ -4562,22 +4564,6 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                 flexShrink: 0,
               }}
             >
-              {workspaceSelectionMode && (
-                <box
-                  id="pc-create-workspace-btn"
-                  onMouseDown={(event) => {
-                    event.preventDefault()
-                    setCreateWorkspaceModalVisible(true)
-                  }}
-                  style={{
-                    flexDirection: "row",
-                    marginBottom: 1,
-                  }}
-                >
-                  <text content="[+ Create workspace]" fg={colors.success} wrapMode="none" selectable={false} />
-                </box>
-              )}
-
               <text id="pc-workspace-version" content={`Piductor ${APP_VERSION}`} fg={colors.textMuted} wrapMode="none" />
               <text
                 id="pc-workspace-archive-tip"
@@ -4658,6 +4644,31 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                   />
                 ))}
                 <text content={lobbySubtitle} fg={colors.textMuted} wrapMode="none" style={{ marginTop: 1 }} />
+
+                <box
+                  id="pc-lobby-open-project-btn"
+                  width={lobbyButtonWidth}
+                  height={3}
+                  border
+                  borderStyle="single"
+                  borderColor={colors.modalBorder}
+                  backgroundColor={colors.commandPaletteBackground}
+                  onMouseDown={(event) => {
+                    event.preventDefault()
+                    setCreateWorkspaceModalVisible(true)
+                  }}
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    marginTop: 2,
+                    paddingLeft: 1,
+                    paddingRight: 1,
+                    flexShrink: 0,
+                  }}
+                >
+                  <text content={lobbyOpenProjectLabel} fg={colors.accentStrong} wrapMode="none" selectable={false} />
+                </box>
               </box>
             </box>
           ) : (
@@ -5308,7 +5319,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
             borderStyle="double"
             borderColor={colors.modalBorder}
             backgroundColor={colors.modalBackground}
-            title="Create workspace"
+            title="Open project"
             titleAlignment="center"
             onMouseDown={(event) => {
               event.preventDefault()
@@ -5321,12 +5332,12 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
               paddingBottom: 1,
             }}
           >
-            <text content="Local repo path" fg={colors.sectionHeaderText} wrapMode="none" selectable={false} />
+            <text content="Local project path" fg={colors.sectionHeaderText} wrapMode="none" selectable={false} />
             <textarea
               id="pc-create-workspace-path"
               ref={createPathRef}
               focused={createWorkspaceModalVisible}
-              placeholder="~/Projects/my-repo"
+              placeholder="~/Projects/my-project"
               onSubmit={() => {
                 void submitCreateWorkspaceFromModal()
               }}
@@ -5365,7 +5376,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                   void submitCreateWorkspaceFromModal()
                 }}
               >
-                <text content="[OK]" fg={colors.success} wrapMode="none" selectable={false} />
+                <text content="[Open]" fg={colors.success} wrapMode="none" selectable={false} />
               </box>
 
               <text content=" " fg={colors.textMuted} wrapMode="none" selectable={false} />
@@ -5381,7 +5392,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
               </box>
 
               <text
-                content="  Enter local repo path · Esc to cancel"
+                content="  Enter project path · Esc to cancel"
                 fg={colors.textSubtle}
                 wrapMode="none"
                 selectable={false}

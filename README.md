@@ -15,7 +15,9 @@ Built with:
 - Start one Pi RPC agent per workspace
 - Send agent messages in `prompt`, `steer`, or `follow_up` mode
 - Stream assistant output into a chat-style markdown transcript
-- Resume prior workspace sessions after app restart (restores selection and conversation replay)
+- Resume prior workspace sessions after app restart (conversation replay + runtime state)
+- Always start in a lobby/splash screen with no active workspace selected
+- Open a local project from the lobby via an inline button + path modal
 - Surface thinking/tool/status events in a persistent Codex-like timeline (no disappearing action trail)
 - Run setup/run/archive scripts per workspace
 - Archive and restore workspaces
@@ -106,6 +108,7 @@ Use `/theme` to open the theme picker (↑/↓ to select, Enter to apply). Theme
 - `Ctrl+L` clear visible logs/run output
 - `Ctrl+C` exit
 - Click top-bar `[+] / [-]` toggles to collapse sidebars
+- From the lobby splash, click `Open project` to add a local repo path
 - Drag vertical separators to resize left/right columns
 - Click sidebar section headers to collapse/expand workspace tree, status, changes, and run terminal
 - Click repo rows in the workspace tree to expand/collapse nested workspaces
