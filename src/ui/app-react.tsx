@@ -961,6 +961,79 @@ export class PiConductorApp {
     }
   }
 
+  public async archiveWorkspaceById(workspaceId: number, forceArchive = false): Promise<boolean> {
+    const workspace = this.store.getWorkspaceById(workspaceId)
+    if (!workspace || workspace.status !== "active") {
+      this.appendGlobalLog(`Workspace not found: ${workspaceId}`)
+      this.refreshAllAndEmit()
+      return false
+    }
+
+    const repo = this.store.getRepoById(workspace.repoId)
+    if (!repo) {
+      this.appendGlobalLog("Workspace repo missing.")
+      this.refreshAllAndEmit()
+      return false
+    }
+
+    let changedCount = 0
+    try {
+      changedCount = getChangedFiles(workspace.worktreePath).length
+    } catch {
+      changedCount = 0
+    }
+
+    if (changedCount > 0 && !forceArchive) {
+      this.appendWorkspaceLog(
+        workspace.id,
+        `[workspace] archive blocked: ${changedCount} uncommitted change(s). Re-run with /workspace archive --force.`,
+      )
+      this.refreshAllAndEmit()
+      return false
+    }
+
+    const runningCount = this.runProcessCount(workspace.id)
+    if (runningCount > 0) {
+      this.appendWorkspaceLog(workspace.id, `[workspace] stopping ${runningCount} run process(es) before archive.`)
+      await this.stopRunProcess(workspace.id, "workspace archive")
+    }
+
+    await this.stopAgent(workspace.id, { force: forceArchive, reason: "archive" })
+
+    if (this.config.scripts.archive) {
+      await this.runConfiguredScript(workspace.id, "archive")
+    }
+
+    try {
+      removeWorktree({ repoRoot: repo.rootPath, worktreePath: workspace.worktreePath, force: forceArchive })
+    } catch (error) {
+      this.appendWorkspaceLog(
+        workspace.id,
+        `[workspace] failed to archive worktree${forceArchive ? " (forced)" : ""}: ${safeErr(error)}`,
+      )
+      this.refreshAllAndEmit()
+      return false
+    }
+
+    this.prViewByWorkspace.delete(workspace.id)
+    this.store.clearMergeChecklistItems(workspace.id)
+    this.store.setWorkspaceArchived(workspace.id, true)
+
+    if (this.selectedWorkspaceId === workspace.id) {
+      this.selectedWorkspaceId = null
+    }
+
+    this.appendGlobalLog(`Archived workspace: ${workspace.name}`)
+    this.reloadWorkspaces(this.selectedWorkspaceId)
+    this.rebuildWorkspaceTreeOptions(this.workspaceTreeValueForSelection())
+    this.refreshStatusPanel()
+    this.refreshDiffPanel()
+    this.refreshLogsPanel()
+    this.refreshTerminalPanel()
+    this.emitSnapshot()
+    return true
+  }
+
   public async createWorkspaceFromPath(inputPath: string): Promise<boolean> {
     const raw = inputPath.trim()
     if (!raw) {
@@ -1216,57 +1289,7 @@ export class PiConductorApp {
             return
           }
 
-          const forceArchive = parsedArchive.force
-
-          const repo = this.store.getRepoById(workspace.repoId)
-          if (!repo) {
-            this.appendGlobalLog("Workspace repo missing.")
-            return
-          }
-
-          let changedCount = 0
-          try {
-            changedCount = getChangedFiles(workspace.worktreePath).length
-          } catch {
-            changedCount = 0
-          }
-
-          if (changedCount > 0 && !forceArchive) {
-            this.appendWorkspaceLog(
-              workspace.id,
-              `[workspace] archive blocked: ${changedCount} uncommitted change(s). Re-run with /workspace archive --force.`,
-            )
-            return
-          }
-
-          const runningCount = this.runProcessCount(workspace.id)
-          if (runningCount > 0) {
-            this.appendWorkspaceLog(workspace.id, `[workspace] stopping ${runningCount} run process(es) before archive.`)
-            await this.stopRunProcess(workspace.id, "workspace archive")
-          }
-
-          await this.stopAgent(workspace.id, { force: forceArchive, reason: "archive" })
-
-          if (this.config.scripts.archive) {
-            await this.runConfiguredScript(workspace.id, "archive")
-          }
-
-          try {
-            removeWorktree({ repoRoot: repo.rootPath, worktreePath: workspace.worktreePath, force: forceArchive })
-          } catch (error) {
-            this.appendWorkspaceLog(
-              workspace.id,
-              `[workspace] failed to archive worktree${forceArchive ? " (forced)" : ""}: ${safeErr(error)}`,
-            )
-            return
-          }
-
-          this.prViewByWorkspace.delete(workspace.id)
-          this.store.clearMergeChecklistItems(workspace.id)
-          this.store.setWorkspaceArchived(workspace.id, true)
-
-          this.appendGlobalLog(`Archived workspace: ${workspace.name}`)
-          this.reloadWorkspaces()
+          await this.archiveWorkspaceById(workspace.id, parsedArchive.force)
           return
         }
 
@@ -3788,6 +3811,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
   const [changesSectionCollapsed, setChangesSectionCollapsed] = useState(false)
   const [terminalSectionCollapsed, setTerminalSectionCollapsed] = useState(false)
   const [createWorkspaceModalVisible, setCreateWorkspaceModalVisible] = useState(false)
+  const [hoveredWorkspaceId, setHoveredWorkspaceId] = useState<number | null>(null)
   const [composerText, setComposerText] = useState("")
   const [commandSuggestionIndex, setCommandSuggestionIndex] = useState(0)
   const [loadingFrameIndex, setLoadingFrameIndex] = useState(0)
@@ -3904,6 +3928,21 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
   const commandSuggestions = findCommandSuggestions(commandQuery)
   const themeOptions = listThemes()
   const selectedModelOption = snapshot.modelOptions[snapshot.modelModalSelectedIndex] ?? null
+  const modelOptionCount = snapshot.modelOptions.length
+  const modelVisibleCount = Math.max(4, Math.floor((modelModalHeight - 8) / 3))
+  const modelWindowStart =
+    modelOptionCount <= modelVisibleCount
+      ? 0
+      : Math.max(
+          0,
+          Math.min(
+            modelOptionCount - modelVisibleCount,
+            snapshot.modelModalSelectedIndex - Math.floor(modelVisibleCount / 2),
+          ),
+        )
+  const visibleModelOptions = snapshot.modelOptions.slice(modelWindowStart, modelWindowStart + modelVisibleCount)
+  const hiddenModelOptionsAbove = modelWindowStart
+  const hiddenModelOptionsBelow = Math.max(0, modelOptionCount - (modelWindowStart + visibleModelOptions.length))
   const commandAutocompleteVisible =
     focusTarget === "input" &&
     !workspaceSelectionMode &&
@@ -3992,6 +4031,21 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
     const maxIndex = Math.max(0, commandSuggestions.length - 1)
     setCommandSuggestionIndex((prev) => Math.max(0, Math.min(prev, maxIndex)))
   }, [commandAutocompleteVisible, commandSuggestions])
+
+  useEffect(() => {
+    if (hoveredWorkspaceId === null) {
+      return
+    }
+
+    const stillVisible = snapshot.workspaceTreeOptions.some((option) => {
+      const parsed = parseWorkspaceTreeValue(option.value)
+      return parsed?.type === "workspace" && parsed.workspaceId === hoveredWorkspaceId
+    })
+
+    if (!stillVisible) {
+      setHoveredWorkspaceId(null)
+    }
+  }, [hoveredWorkspaceId, snapshot.workspaceTreeOptions])
 
   const applyCommandSuggestion = (command: string) => {
     const next = `/${command} `
@@ -4545,6 +4599,11 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                             id={`pc-workspace-tree-row-${index}`}
                             height={1}
                             backgroundColor={treeSelected ? colors.markdownCodeBackground : "transparent"}
+                            onMouseMove={() => {
+                              if (hoveredWorkspaceId !== null) {
+                                setHoveredWorkspaceId(null)
+                              }
+                            }}
                             style={{
                               flexDirection: "row",
                               alignItems: "center",
@@ -4617,6 +4676,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                           ? colors.markdownCodeBackground
                           : colors.inputBackground
                       const workspaceFg = workspaceActive || treeSelected ? colors.selectedText : colors.textSecondary
+                      const workspaceHovered = hoveredWorkspaceId === parsed.workspaceId
 
                       return (
                         <box
@@ -4624,6 +4684,11 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                           id={`pc-workspace-tree-row-${index}`}
                           height={2}
                           backgroundColor={workspaceBg}
+                          onMouseMove={() => {
+                            if (hoveredWorkspaceId !== parsed.workspaceId) {
+                              setHoveredWorkspaceId(parsed.workspaceId)
+                            }
+                          }}
                           onMouseDown={(event) => {
                             event.preventDefault()
                             setWorkspaceTreeCollapsed(false)
@@ -4656,17 +4721,33 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                                 flexShrink: 1,
                               }}
                             />
-                            <text
-                              id={`pc-workspace-tree-row-activity-${index}`}
-                              content={activityText}
-                              fg={colors.textMuted}
-                              wrapMode="none"
-                              selectable={false}
-                              style={{
-                                flexShrink: 0,
-                                marginLeft: 1,
-                              }}
-                            />
+                            {workspaceHovered ? (
+                              <box
+                                id={`pc-workspace-tree-row-archive-${index}`}
+                                onMouseDown={(event) => {
+                                  event.preventDefault()
+                                  void app.archiveWorkspaceById(parsed.workspaceId, false)
+                                }}
+                                style={{
+                                  flexShrink: 0,
+                                  marginLeft: 1,
+                                }}
+                              >
+                                <text content="[-]" fg={colors.error} wrapMode="none" selectable={false} />
+                              </box>
+                            ) : (
+                              <text
+                                id={`pc-workspace-tree-row-activity-${index}`}
+                                content={activityText}
+                                fg={colors.textMuted}
+                                wrapMode="none"
+                                selectable={false}
+                                style={{
+                                  flexShrink: 0,
+                                  marginLeft: 1,
+                                }}
+                              />
+                            )}
                           </box>
 
                           <box
@@ -4698,16 +4779,18 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                                 flexShrink: 1,
                               }}
                             />
-                            <text
-                              id={`pc-workspace-tree-row-diff-${index}`}
-                              content={`${plusText}/${minusText}`}
-                              fg={colors.textMuted}
-                              wrapMode="none"
-                              selectable={false}
-                              style={{
-                                flexShrink: 0,
-                              }}
-                            />
+                            {!workspaceHovered ? (
+                              <text
+                                id={`pc-workspace-tree-row-diff-${index}`}
+                                content={`${plusText}/${minusText}`}
+                                fg={colors.textMuted}
+                                wrapMode="none"
+                                selectable={false}
+                                style={{
+                                  flexShrink: 0,
+                                }}
+                              />
+                            ) : null}
                           </box>
                         </box>
                       )
@@ -5722,7 +5805,20 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                 marginTop: 1,
               }}
             >
-              {snapshot.modelOptions.map((option, index) => {
+              {hiddenModelOptionsAbove > 0 ? (
+                <text
+                  content={`↑ ${hiddenModelOptionsAbove} more models`}
+                  fg={colors.textSubtle}
+                  wrapMode="none"
+                  style={{
+                    flexShrink: 0,
+                    marginBottom: 1,
+                  }}
+                />
+              ) : null}
+
+              {visibleModelOptions.map((option, visibleIndex) => {
+                const index = modelWindowStart + visibleIndex
                 const selected = index === snapshot.modelModalSelectedIndex
                 const active = option.key === snapshot.modelLabel
                 const label = `${selected ? "›" : " "} ${option.name}${active ? " · current" : ""}`
@@ -5741,7 +5837,8 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                     style={{
                       flexDirection: "column",
                       flexShrink: 0,
-                      marginBottom: index === snapshot.modelOptions.length - 1 ? 0 : 1,
+                      marginBottom:
+                        visibleIndex === visibleModelOptions.length - 1 && hiddenModelOptionsBelow === 0 ? 0 : 1,
                     }}
                   >
                     <text content={label} fg={selected ? colors.selectedText : colors.textPrimary} wrapMode="none" />
@@ -5749,10 +5846,21 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                   </box>
                 )
               })}
+
+              {hiddenModelOptionsBelow > 0 ? (
+                <text
+                  content={`↓ ${hiddenModelOptionsBelow} more models`}
+                  fg={colors.textSubtle}
+                  wrapMode="none"
+                  style={{
+                    flexShrink: 0,
+                  }}
+                />
+              ) : null}
             </scrollbox>
 
             <text
-              content="Enter applies selected model"
+              content={`Enter applies selected model${modelOptionCount > 0 ? ` · ${snapshot.modelModalSelectedIndex + 1}/${modelOptionCount}` : ""}`}
               fg={colors.textSubtle}
               wrapMode="none"
               selectable={false}
