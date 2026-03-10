@@ -3820,7 +3820,8 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
     !snapshot.commandModalVisible &&
     hasSlashCommandPrefix
   const selectedCommandSuggestion = commandSuggestions[commandSuggestionIndex] ?? commandSuggestions[0] ?? null
-  const commandSuggestionHeight = commandAutocompleteVisible ? Math.min(commandSuggestions.length, 6) + 1 : 0
+  const commandSuggestionRows = commandAutocompleteVisible ? Math.min(commandSuggestions.length, 6) : 0
+  const commandSuggestionHeight = commandAutocompleteVisible ? commandSuggestionRows + 2 : 0
   const commandSuggestionLineWidth = Math.max(32, centerColumnWidth - 12)
 
   const statusRows = snapshot.statusText
