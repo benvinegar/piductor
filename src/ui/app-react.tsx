@@ -4594,8 +4594,6 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                       if (isRepoRow) {
                         const caret = option.name.startsWith("▾") ? "▾" : "▸"
                         const projectLabel = option.name.replace(/^[▾▸]\s*/, "")
-                        const hasVisibleWorkspaceChildren =
-                          nextParsed?.type === "workspace" && nextParsed.repoId === parsed.repoId
 
                         return (
                           <box
@@ -4612,7 +4610,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                               flexDirection: "row",
                               alignItems: "center",
                               flexShrink: 0,
-                              marginBottom: hasVisibleWorkspaceChildren ? 0 : 1,
+                              marginBottom: 1,
                             }}
                           >
                             <box
@@ -4685,17 +4683,17 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                         previousParsed?.type === "workspace" && previousParsed.repoId === parsed.repoId
                       const hasNextWorkspaceSibling = nextParsed?.type === "workspace" && nextParsed.repoId === parsed.repoId
                       const showTopConnector = !hasPrevWorkspaceSibling
-                      const showSeparator = hasNextWorkspaceSibling
                       const nameConnector = hasNextWorkspaceSibling ? "├─ " : "└─ "
                       const statusPrefix = hasNextWorkspaceSibling ? "│  " : "   "
-                      const workspaceRowHeight = (showTopConnector ? 1 : 0) + 2 + (showSeparator ? 1 : 0)
+                      const separatorConnector = hasNextWorkspaceSibling ? "│" : " "
+                      const workspaceRowHeight = showTopConnector ? 4 : 3
 
                       return (
                         <box
                           key={value}
                           id={`pc-workspace-tree-row-${index}`}
                           height={workspaceRowHeight}
-                          backgroundColor="transparent"
+                          backgroundColor={workspaceBg}
                           onMouseMove={() => {
                             if (hoveredWorkspaceId !== parsed.workspaceId) {
                               setHoveredWorkspaceId(parsed.workspaceId)
@@ -4739,7 +4737,6 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                           <box
                             id={`pc-workspace-tree-row-top-${index}`}
                             height={1}
-                            backgroundColor={workspaceBg}
                             style={{
                               flexDirection: "row",
                               alignItems: "center",
@@ -4798,7 +4795,6 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                           <box
                             id={`pc-workspace-tree-row-bottom-${index}`}
                             height={1}
-                            backgroundColor={workspaceBg}
                             style={{
                               flexDirection: "row",
                               alignItems: "center",
@@ -4849,26 +4845,24 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                             ) : null}
                           </box>
 
-                          {showSeparator ? (
-                            <box
-                              id={`pc-workspace-tree-row-separator-${index}`}
-                              height={1}
+                          <box
+                            id={`pc-workspace-tree-row-separator-${index}`}
+                            height={1}
+                            style={{
+                              flexDirection: "row",
+                              alignItems: "center",
+                            }}
+                          >
+                            <text
+                              content={separatorConnector}
+                              fg={colors.textMuted}
+                              wrapMode="none"
+                              selectable={false}
                               style={{
-                                flexDirection: "row",
-                                alignItems: "center",
+                                flexShrink: 0,
                               }}
-                            >
-                              <text
-                                content="│"
-                                fg={colors.textMuted}
-                                wrapMode="none"
-                                selectable={false}
-                                style={{
-                                  flexShrink: 0,
-                                }}
-                              />
-                            </box>
-                          ) : null}
+                            />
+                          </box>
                         </box>
                       )
                     })}
