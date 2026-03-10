@@ -101,6 +101,7 @@ Use `/theme` to open the theme picker (↑/↓ to select, Enter to apply). Theme
 - `Ctrl+1` focus workspace tree
 - `Ctrl+2` focus workspace tree (alias)
 - `Ctrl+3` focus composer
+- Composer: `Enter` sends, `Shift+Enter` inserts newline, `Ctrl+J` inserts newline
 - `Tab` in composer toggles Plan/Build send mode (falls back to focus cycling outside composer)
 - `Ctrl+Left` collapse/expand left sidebar
 - `Ctrl+Right` collapse/expand right sidebar
