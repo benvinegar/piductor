@@ -137,20 +137,45 @@ Right sidebar:
 - Clicking a repo row in the workspace tree should expand/collapse that repo and keep workspace ownership visually explicit.
 - Any new interaction must be fully operable with the mouse; keyboard/command fallback is optional.
 
+### Keyboard/input precedence
+
+Keep key handling order explicit and stable:
+
+1. active modal handlers
+2. composer slash-autocomplete handlers
+3. composer-local shortcuts (e.g. `Tab` toggles Plan/Build mode)
+4. global focus traversal/navigation
+
+Do not introduce new keybindings that shadow a higher-priority context.
+
+### RPC-backed picker requirements
+
+For picker commands backed by RPC data (e.g. `/model`):
+
+- Support both runtime states:
+  - workspace agent running (use live process)
+  - workspace agent stopped (probe/fallback path or explicit actionable error)
+- Never fail silently; append a visible log line when catalog fetch or apply fails.
+- Ensure keyboard (`↑/↓`, `Enter`, `Esc`) and mouse selection both work.
+
 ## Command surface (keep backward compatible)
 
-`/help`, `/repo ...`, `/workspace ...`, `/agent ...`, `/mode ...`, `/run ...`, `/status`, `/diff`, `/ui ...`
+`/help`, `/repo ...`, `/workspace ...`, `/agent ...`, `/mode ...`, `/model`, `/theme`, `/pr ...`, `/run ...`, `/test ...`, `/status`, `/checklist ...`, `/diff ...`, `/ui ...`
 
 If you add/rename commands, update:
 
-1. in-app `/help` text
-2. `README.md`
+1. `src/ui/commands.ts` (`COMMAND_CATALOG`)
+2. in-app `/help` modal content
+3. `README.md`
+4. command/help tests (for example `tests/commands.test.ts`)
 
 ## Persistence/data rules
 
 - DB schema lives in `src/core/db.ts` migration block
 - Keep existing tables compatible unless migration is intentional
 - Workspaces are soft-archived in DB and worktree path is removed from git
+- Preference-only updates (theme/model/mode defaults) must not imply runtime liveness.
+- When persisting preference changes for a stopped agent, do not keep stale runtime fields (e.g. keep `pid: null` unless process liveness is known).
 
 ## Safety checks before finishing
 
@@ -168,6 +193,12 @@ For any UI/interaction change, run your own verification in the live TUI session
 - Use tmux pane controls to interact with the running app (`tmux send-keys`, `tmux capture-pane`).
 - Validate the specific interaction changed (e.g. click selection, collapse/expand, resize).
 - Confirm no obvious regressions in adjacent flows (focus, command input, sidebar toggles).
+- For command/modal/picker changes, verify this minimum matrix:
+  - no workspace selected
+  - workspace selected + agent stopped
+  - workspace selected + agent running
+- For picker UIs, verify both keyboard apply (`Enter`) and mouse click apply.
+- Verify at least one user-visible failure path message for fetch/apply errors when relevant.
 - Report what was tested and the observed result in the final summary.
 
 Do not rely only on code inspection/typecheck/tests for TUI behavior changes.
