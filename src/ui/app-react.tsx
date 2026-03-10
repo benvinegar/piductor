@@ -4693,7 +4693,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                           key={value}
                           id={`pc-workspace-tree-row-${index}`}
                           height={workspaceRowHeight}
-                          backgroundColor={workspaceBg}
+                          backgroundColor="transparent"
                           onMouseMove={() => {
                             if (hoveredWorkspaceId !== parsed.workspaceId) {
                               setHoveredWorkspaceId(parsed.workspaceId)
@@ -4752,44 +4752,55 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                                 flexShrink: 0,
                               }}
                             />
-                            <text
-                              id={`pc-workspace-tree-row-name-${index}`}
-                              content={option.name}
-                              fg={workspaceFg}
-                              wrapMode="none"
+                            <box
+                              id={`pc-workspace-tree-row-top-content-${index}`}
+                              backgroundColor={workspaceBg}
                               style={{
+                                flexDirection: "row",
+                                alignItems: "center",
                                 flexGrow: 1,
                                 flexShrink: 1,
                               }}
-                            />
-                            {workspaceHovered ? (
-                              <box
-                                id={`pc-workspace-tree-row-archive-${index}`}
-                                onMouseDown={(event) => {
-                                  event.preventDefault()
-                                  void app.archiveWorkspaceById(parsed.workspaceId, false)
-                                }}
-                                style={{
-                                  flexShrink: 0,
-                                  marginLeft: 1,
-                                  marginRight: 1,
-                                }}
-                              >
-                                <text content="[-]" fg={colors.error} wrapMode="none" selectable={false} />
-                              </box>
-                            ) : (
+                            >
                               <text
-                                id={`pc-workspace-tree-row-activity-${index}`}
-                                content={activityText}
-                                fg={colors.textMuted}
+                                id={`pc-workspace-tree-row-name-${index}`}
+                                content={option.name}
+                                fg={workspaceFg}
                                 wrapMode="none"
-                                selectable={false}
                                 style={{
-                                  flexShrink: 0,
-                                  marginLeft: 1,
+                                  flexGrow: 1,
+                                  flexShrink: 1,
                                 }}
                               />
-                            )}
+                              {workspaceHovered ? (
+                                <box
+                                  id={`pc-workspace-tree-row-archive-${index}`}
+                                  onMouseDown={(event) => {
+                                    event.preventDefault()
+                                    void app.archiveWorkspaceById(parsed.workspaceId, false)
+                                  }}
+                                  style={{
+                                    flexShrink: 0,
+                                    marginLeft: 1,
+                                    marginRight: 1,
+                                  }}
+                                >
+                                  <text content="[-]" fg={colors.error} wrapMode="none" selectable={false} />
+                                </box>
+                              ) : (
+                                <text
+                                  id={`pc-workspace-tree-row-activity-${index}`}
+                                  content={activityText}
+                                  fg={colors.textMuted}
+                                  wrapMode="none"
+                                  selectable={false}
+                                  style={{
+                                    flexShrink: 0,
+                                    marginLeft: 1,
+                                  }}
+                                />
+                              )}
+                            </box>
                           </box>
 
                           <box
@@ -4810,31 +4821,19 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                                 flexShrink: 0,
                               }}
                             />
-                            <text
-                              id={`pc-workspace-tree-row-status-star-${index}`}
-                              content="* "
-                              fg={colors.textMuted}
-                              wrapMode="none"
-                              selectable={false}
+                            <box
+                              id={`pc-workspace-tree-row-bottom-content-${index}`}
+                              backgroundColor={workspaceBg}
                               style={{
-                                flexShrink: 0,
-                              }}
-                            />
-                            <text
-                              id={`pc-workspace-tree-row-status-${index}`}
-                              content={statusText}
-                              fg={statusColor}
-                              wrapMode="none"
-                              selectable={false}
-                              style={{
+                                flexDirection: "row",
+                                alignItems: "center",
                                 flexGrow: 1,
                                 flexShrink: 1,
                               }}
-                            />
-                            {!workspaceHovered ? (
+                            >
                               <text
-                                id={`pc-workspace-tree-row-diff-${index}`}
-                                content={`${plusText}/${minusText}`}
+                                id={`pc-workspace-tree-row-status-star-${index}`}
+                                content="* "
                                 fg={colors.textMuted}
                                 wrapMode="none"
                                 selectable={false}
@@ -4842,7 +4841,30 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                                   flexShrink: 0,
                                 }}
                               />
-                            ) : null}
+                              <text
+                                id={`pc-workspace-tree-row-status-${index}`}
+                                content={statusText}
+                                fg={statusColor}
+                                wrapMode="none"
+                                selectable={false}
+                                style={{
+                                  flexGrow: 1,
+                                  flexShrink: 1,
+                                }}
+                              />
+                              {!workspaceHovered ? (
+                                <text
+                                  id={`pc-workspace-tree-row-diff-${index}`}
+                                  content={`${plusText}/${minusText}`}
+                                  fg={colors.textMuted}
+                                  wrapMode="none"
+                                  selectable={false}
+                                  style={{
+                                    flexShrink: 0,
+                                  }}
+                                />
+                              ) : null}
+                            </box>
                           </box>
 
                           <box
