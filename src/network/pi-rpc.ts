@@ -207,6 +207,12 @@ export class PiRpcProcess {
     return Array.isArray(response.data?.messages) ? response.data.messages : []
   }
 
+  async getLastAssistantText(): Promise<string | null> {
+    const response = await this.sendExpectSuccess({ type: "get_last_assistant_text" })
+    const text = response.data?.text
+    return typeof text === "string" && text.trim().length > 0 ? text : null
+  }
+
   async switchSession(sessionPath: string): Promise<void> {
     await this.sendExpectSuccess({ type: "switch_session", sessionPath })
   }
