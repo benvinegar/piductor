@@ -4456,6 +4456,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                           flexDirection: "column",
                           flexShrink: 0,
                           marginBottom: isLast ? 0 : 1,
+                          marginRight: 1,
                           paddingTop: 1,
                           paddingBottom: 1,
                           paddingLeft: 1,
