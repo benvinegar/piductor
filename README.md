@@ -21,7 +21,7 @@ Built with:
 - Surface thinking/tool/status events in a persistent Codex-like timeline (no disappearing action trail)
 - Run setup/run/archive scripts per workspace
 - Archive and restore workspaces
-- Show per-file change stats (`+/-`) in a review panel
+- Show per-file change stats (`+/-`) in a review panel against `main` (branch diff view)
 - Collapse sidebars, resize side columns with mouse drag, and collapse sidebar sections
 - Switch between 5 built-in UI themes (`/theme`) and available agent models (`/model`) via picker modals
 - Navigate a unified workspace tree grouped by project (`project -> workspaces`) with caret toggles, `[+]` quick-create workspace actions, and persisted collapse/expand state

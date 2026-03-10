@@ -306,17 +306,73 @@ export function parsePorcelainStatusLine(line: string): { status: string; file: 
   return { status, file: file.trim() }
 }
 
-export function getChangedFileStats(worktreePath: string): ChangedFileStat[] {
-  const statusLines = getChangedFiles(worktreePath)
-  const statusMap = new Map<string, string>()
-
-  for (const line of statusLines) {
-    const parsed = parsePorcelainStatusLine(line)
-    if (!parsed) continue
-    statusMap.set(parsed.file, parsed.status)
+function resolveBranchDiffBaseRef(worktreePath: string): string {
+  const preferred = ["refs/remotes/origin/main", "refs/heads/main", "main"]
+  for (const ref of preferred) {
+    if (commitRefExists(worktreePath, ref)) {
+      return ref
+    }
   }
 
-  const diff = runAllowError("git", ["-C", worktreePath, "diff", "--numstat", "--no-color", "HEAD"])
+  const defaultBranch = getDefaultBranchName(worktreePath)
+  const fallback = [
+    `refs/remotes/origin/${defaultBranch}`,
+    `refs/heads/${defaultBranch}`,
+    defaultBranch,
+  ]
+
+  for (const ref of fallback) {
+    if (commitRefExists(worktreePath, ref)) {
+      return ref
+    }
+  }
+
+  return "HEAD"
+}
+
+function parseNameStatusLine(line: string): { status: string; file: string } | null {
+  const parts = line.split("\t")
+  if (parts.length < 2) {
+    return null
+  }
+
+  const statusRaw = (parts[0] ?? "").trim()
+  const status = statusRaw.slice(0, 1) || "M"
+  const renamed = status === "R" || status === "C"
+  const fileRaw = renamed ? (parts[2] ?? parts[1] ?? "") : (parts[1] ?? "")
+  const file = fileRaw.trim()
+
+  if (!file) {
+    return null
+  }
+
+  return { status, file }
+}
+
+export function getChangedFileStats(worktreePath: string): ChangedFileStat[] {
+  const baseRef = resolveBranchDiffBaseRef(worktreePath)
+
+  const nameStatusResult = runAllowError(
+    "git",
+    ["-C", worktreePath, "diff", "--name-status", "--no-color", `${baseRef}...HEAD`],
+    worktreePath,
+  )
+  const statusMap = new Map<string, string>()
+  const statusText = (nameStatusResult.stdout ?? "").trim()
+
+  if (statusText) {
+    for (const line of statusText.split(/\r?\n/)) {
+      const parsed = parseNameStatusLine(line)
+      if (!parsed) continue
+      statusMap.set(parsed.file, parsed.status)
+    }
+  }
+
+  const diff = runAllowError(
+    "git",
+    ["-C", worktreePath, "diff", "--numstat", "--no-color", `${baseRef}...HEAD`],
+    worktreePath,
+  )
   const numstatText = (diff.stdout ?? "").trim()
   const statsMap = new Map<string, { added: number | null; removed: number | null }>()
 
@@ -349,7 +405,16 @@ export function getChangedFileStats(worktreePath: string): ChangedFileStat[] {
 }
 
 export function getDiff(worktreePath: string, maxLines = 220): string {
-  const output = runAllowError("git", ["-C", worktreePath, "--no-pager", "diff", "--no-color", "--unified=3"])
+  const baseRef = resolveBranchDiffBaseRef(worktreePath)
+  const output = runAllowError("git", [
+    "-C",
+    worktreePath,
+    "--no-pager",
+    "diff",
+    "--no-color",
+    "--unified=3",
+    `${baseRef}...HEAD`,
+  ])
   const text = (output.stdout ?? "").trim()
   if (!text) return ""
 
@@ -360,33 +425,14 @@ export function getDiff(worktreePath: string, maxLines = 220): string {
 }
 
 export function getDiffForFile(worktreePath: string, filePath: string, maxLines = 500): string {
+  const baseRef = resolveBranchDiffBaseRef(worktreePath)
   const tracked = runAllowError(
     "git",
-    ["-C", worktreePath, "--no-pager", "diff", "--no-color", "--unified=3", "--", filePath],
+    ["-C", worktreePath, "--no-pager", "diff", "--no-color", "--unified=3", `${baseRef}...HEAD`, "--", filePath],
     worktreePath,
   )
 
-  let text = String(tracked.stdout ?? "").trimEnd()
-
-  if (!text) {
-    const untracked = runAllowError(
-      "git",
-      [
-        "-C",
-        worktreePath,
-        "--no-pager",
-        "diff",
-        "--no-color",
-        "--unified=3",
-        "--no-index",
-        "--",
-        "/dev/null",
-        filePath,
-      ],
-      worktreePath,
-    )
-    text = String(untracked.stdout ?? "").trimEnd()
-  }
+  const text = String(tracked.stdout ?? "").trimEnd()
 
   if (!text) {
     return ""

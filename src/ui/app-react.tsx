@@ -2879,7 +2879,7 @@ export class PiConductorApp {
       const status = agentState?.status ?? "stopped"
       let changed = 0
       try {
-        changed = getChangedFiles(workspace.worktreePath).length
+        changed = getChangedFileStats(workspace.worktreePath).length
       } catch {
         changed = 0
       }
@@ -3451,7 +3451,7 @@ export class PiConductorApp {
   private evaluateWorkspaceMergeChecklist(workspace: WorkspaceRecord) {
     let changedCount = 0
     try {
-      changedCount = getChangedFiles(workspace.worktreePath).length
+      changedCount = getChangedFileStats(workspace.worktreePath).length
     } catch {
       changedCount = 0
     }
@@ -3717,7 +3717,7 @@ export class PiConductorApp {
       if (stats.length === 0) {
         this.diffSelectedIndex = 0
         this.diffRows = []
-        this.diffText = "Working tree clean."
+        this.diffText = "No branch changes against main."
         this.selectedDiffPathByWorkspace.delete(workspace.id)
         this.selectedDiffHunkByWorkspace.delete(workspace.id)
         this.diffFingerprintByWorkspace.set(workspace.id, "")
