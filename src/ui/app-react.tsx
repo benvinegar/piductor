@@ -2915,7 +2915,7 @@ export class PiConductorApp {
     this.emitSnapshot()
   }
 
-  private async resolveModelOptionsForWorkspace(workspaceId: number): Promise<ModelOption[]> {
+  private async resolveModelOptionsForWorkspace(workspace: WorkspaceRecord): Promise<ModelOption[]> {
     const deduped = new Map<string, ModelOption>()
 
     const add = (option: ModelOption | null) => {
@@ -2925,8 +2925,51 @@ export class PiConductorApp {
       }
     }
 
-    const current = this.store.getAgent(workspaceId)
+    const current = this.store.getAgent(workspace.id)
     const currentModel = current?.model ?? this.config.defaultModel ?? null
+
+    const loadFromAgent = async (agent: PiRpcProcess) => {
+      const modelsRaw = await agent.getAvailableModels()
+      for (const raw of modelsRaw) {
+        add(toModelOption(raw))
+      }
+
+      try {
+        const state = await agent.getState()
+        add(toModelOption(state?.model))
+      } catch {
+        // Ignore state fetch failure; model list is already populated.
+      }
+    }
+
+    const runningAgent = this.agentByWorkspace.get(workspace.id)
+    if (runningAgent) {
+      try {
+        await loadFromAgent(runningAgent)
+      } catch {
+        // Ignore model catalog fetch failures and fall back to known model labels.
+      }
+    } else {
+      const probe = new PiRpcProcess({
+        piCommand: this.config.piCommand,
+        cwd: workspace.worktreePath,
+        model: currentModel ?? undefined,
+      })
+
+      try {
+        await probe.start()
+        await loadFromAgent(probe)
+      } catch {
+        // Ignore probe failures and fall back to known model labels.
+      } finally {
+        try {
+          await probe.stop()
+        } catch {
+          await probe.kill().catch(() => undefined)
+        }
+      }
+    }
+
     const parsedCurrent = parseModelKey(currentModel)
     if (parsedCurrent) {
       add({
@@ -2936,18 +2979,6 @@ export class PiConductorApp {
         name: parsedCurrent.modelId,
         description: `${parsedCurrent.provider} · preferred`,
       })
-    }
-
-    const runningAgent = this.agentByWorkspace.get(workspaceId)
-    if (runningAgent) {
-      try {
-        const modelsRaw = await runningAgent.getAvailableModels()
-        for (const raw of modelsRaw) {
-          add(toModelOption(raw))
-        }
-      } catch {
-        // Ignore model catalog fetch failures and fall back to known model labels.
-      }
     }
 
     return [...deduped.values()]
@@ -2968,7 +2999,7 @@ export class PiConductorApp {
       this.store.setAgentState({
         workspaceId: workspace.id,
         status: current?.status ?? "stopped",
-        pid: current?.pid ?? null,
+        pid: null,
         model: modelKey,
         sessionId: current?.sessionId ?? null,
         lastError: current?.lastError ?? null,
@@ -3004,9 +3035,9 @@ export class PiConductorApp {
       return
     }
 
-    const options = await this.resolveModelOptionsForWorkspace(workspace.id)
+    const options = await this.resolveModelOptionsForWorkspace(workspace)
     if (options.length === 0) {
-      this.appendWorkspaceLog(workspace.id, "[model] no models available. Start agent to load model catalog.")
+      this.appendWorkspaceLog(workspace.id, "[model] no models available from provider catalog.")
       return
     }
 
