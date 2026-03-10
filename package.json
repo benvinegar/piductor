@@ -1,14 +1,49 @@
 {
   "name": "piductor",
   "version": "0.1.0",
-  "private": true,
+  "description": "Terminal-native control plane for Pi coding agents across git workspaces and PR branches.",
   "type": "module",
+  "bin": {
+    "piductor": "./bin/piductor.mjs"
+  },
+  "files": [
+    "bin",
+    "src",
+    "README.md",
+    "LICENSE",
+    "docs"
+  ],
   "scripts": {
     "dev": "./src/main.ts",
     "start": "./src/main.ts",
     "check": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest"
+  },
+  "keywords": [
+    "piductor",
+    "tui",
+    "terminal",
+    "coding-agent",
+    "git-worktree",
+    "bun",
+    "pi"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/benvinegar/piductor.git"
+  },
+  "homepage": "https://github.com/benvinegar/piductor#readme",
+  "bugs": {
+    "url": "https://github.com/benvinegar/piductor/issues"
+  },
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=18",
+    "bun": ">=1.1.0"
   },
   "dependencies": {
     "@opentui/core": "^0.1.86",

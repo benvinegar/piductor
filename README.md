@@ -26,7 +26,13 @@ Piductor is a terminal-native control plane for teams running Pi coding agents a
 - `pi` CLI available on `PATH` (used in RPC mode)
 - Optional: [`gh`](https://cli.github.com/) for `/pr ...` commands
 
-### From source
+### Option 1: npm (global)
+
+```bash
+npm i -g piductor
+```
+
+### Option 2: from source
 
 ```bash
 git clone https://github.com/benvinegar/piductor.git
@@ -35,6 +41,12 @@ bun install
 ```
 
 ## Quick start
+
+```bash
+piductor
+```
+
+If you are running from a local checkout instead of a global install:
 
 ```bash
 bun run dev
@@ -147,7 +159,7 @@ Use GitHub private vulnerability reporting:
 
 ## License
 
-This repository does not currently include a `LICENSE` file.
+[MIT](LICENSE) © Ben Vinegar
 
 ## Community / support
 
