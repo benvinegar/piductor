@@ -4593,7 +4593,7 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                             flexDirection: "column",
                             flexShrink: 0,
                             marginBottom: 1,
-                            paddingLeft: 1,
+                            paddingLeft: 2,
                             paddingRight: 1,
                           }}
                         >
@@ -4636,6 +4636,16 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                               alignItems: "center",
                             }}
                           >
+                            <text
+                              id={`pc-workspace-tree-row-status-dot-${index}`}
+                              content="· "
+                              fg={colors.textMuted}
+                              wrapMode="none"
+                              selectable={false}
+                              style={{
+                                flexShrink: 0,
+                              }}
+                            />
                             <text
                               id={`pc-workspace-tree-row-status-${index}`}
                               content={statusText}
