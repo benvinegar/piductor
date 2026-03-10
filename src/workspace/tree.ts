@@ -52,7 +52,7 @@ export function formatWorkspaceTreeRowName(params: {
   removed?: number
 }): string {
   if (params.isRepo) {
-    return `${params.expanded ? "▾" : "▸"} ${params.repoId} - ${params.repoName ?? "repo"}`
+    return `${params.expanded ? "▾" : "▸"} ${params.repoName ?? "repo"}`
   }
 
   return `${params.workspaceName ?? params.branch ?? "workspace"}`

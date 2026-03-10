@@ -40,7 +40,7 @@ describe("workspace-tree helpers", () => {
         repoId: 3,
         repoName: "baudbot-alpha",
       }),
-    ).toBe("▾ 3 - baudbot-alpha")
+    ).toBe("▾ baudbot-alpha")
 
     expect(
       formatWorkspaceTreeRowName({

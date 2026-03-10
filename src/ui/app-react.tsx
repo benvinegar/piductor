@@ -39,7 +39,6 @@ import {
   parseWorkspaceTreeRowMeta,
   parseWorkspaceTreeValue,
   repoTreeValue,
-  TREE_REPO_PREFIX,
   workspaceTreeValue,
 } from "../workspace/tree"
 import { parseWorkspaceArchiveArgs, workspaceArchiveUsage } from "../workspace/archive"
@@ -865,6 +864,62 @@ export class PiConductorApp {
     return `${stem}-${Date.now().toString(36).slice(-4)}`
   }
 
+  public toggleRepoExpanded(repoId: number) {
+    if (this.expandedRepoIds.has(repoId)) {
+      this.expandedRepoIds.delete(repoId)
+    } else {
+      this.expandedRepoIds.add(repoId)
+    }
+
+    this.rebuildWorkspaceTreeOptions(this.workspaceTreeValueForSelection())
+    this.emitSnapshot()
+  }
+
+  public async createWorkspaceForRepo(repoId: number): Promise<boolean> {
+    const repo = this.store.getRepoById(repoId)
+    if (!repo) {
+      this.appendGlobalLog(`Project not found: ${repoId}`)
+      this.refreshAllAndEmit()
+      return false
+    }
+
+    try {
+      const baseRef = getDefaultBranchName(repo.rootPath)
+      const workspaceName = this.nextWorkspaceName(repo.id, suggestWorkspaceNameFromBranch(baseRef))
+      const created = createWorktree({
+        repoRoot: repo.rootPath,
+        workspacesDir: this.config.workspacesDir,
+        workspaceName,
+        baseRef,
+      })
+
+      const workspace = this.store.createWorkspace(repo.id, workspaceName, created.branch, created.worktreePath)
+      this.expandedRepoIds.add(repo.id)
+      this.appendWorkspaceLog(
+        workspace.id,
+        `Workspace created at ${workspace.worktreePath} on branch ${workspace.branch} (base ${baseRef})`,
+      )
+
+      if (this.config.scripts.setup) {
+        void this.runConfiguredScript(workspace.id, "setup")
+      }
+
+      this.reloadRepos(this.selectedRepoId)
+      this.reloadWorkspaces(this.selectedWorkspaceId)
+      this.rebuildWorkspaceTreeOptions(this.workspaceTreeValueForSelection())
+      this.refreshStatusPanel()
+      this.refreshDiffPanel()
+      this.refreshLogsPanel()
+      this.refreshTerminalPanel()
+      this.emitSnapshot()
+      return true
+    } catch (error) {
+      this.appendGlobalLog(`Failed to create workspace for project ${repo.name}: ${safeErr(error)}`)
+      this.refreshAllAndEmit()
+      return false
+    }
+  }
+
   public async createWorkspaceFromPath(inputPath: string): Promise<boolean> {
     const raw = inputPath.trim()
     if (!raw) {
@@ -1008,6 +1063,7 @@ export class PiConductorApp {
           }
 
           this.selectedRepoId = repo.id
+          this.expandedRepoIds.add(repo.id)
           this.reloadRepos(repo.id)
           this.reloadWorkspaces()
           this.appendGlobalLog(`Selected repo: ${repo.name}`)
@@ -2616,10 +2672,6 @@ export class PiConductorApp {
       if (!repoIds.has(repoId)) {
         this.expandedRepoIds.delete(repoId)
       }
-    }
-
-    if (this.selectedRepoId && repoIds.has(this.selectedRepoId)) {
-      this.expandedRepoIds.add(this.selectedRepoId)
     }
 
     const treeOptions: SelectOption[] = []
@@ -4433,122 +4485,179 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                     }}
                   >
                     {snapshot.workspaceTreeOptions.map((option, index) => {
-                      const selected = index === snapshot.workspaceTreeSelectedIndex
                       const value = String(option.value ?? "")
-                      const isRepoRow = value.startsWith(TREE_REPO_PREFIX)
-                      const meta = !isRepoRow ? parseWorkspaceTreeRowMeta(option.description) : null
-                      const plusText = meta ? `+${meta.added}` : "+0"
-                      const minusText = meta ? `-${meta.removed}` : "-0"
-                      const statusText = meta ? formatWorkspaceRuntimeLabel(meta.status, meta.busy) : "stopped"
-                      const statusColor = workspaceStatusColor(statusText, theme)
-                      const activityText = meta ? formatWorkspaceActivityAge(meta.activityAt) : "-"
+                      const parsed = parseWorkspaceTreeValue(option.value)
+                      if (!parsed) {
+                        return null
+                      }
+
+                      const treeSelected = index === snapshot.workspaceTreeSelectedIndex
+                      const isRepoRow = parsed.type === "repo"
+
+                      if (isRepoRow) {
+                        const caret = option.name.startsWith("▾") ? "▾" : "▸"
+                        const projectLabel = option.name.replace(/^[▾▸]\s*/, "")
+
+                        return (
+                          <box
+                            key={value}
+                            id={`pc-workspace-tree-row-${index}`}
+                            height={1}
+                            backgroundColor={treeSelected ? colors.markdownCodeBackground : "transparent"}
+                            style={{
+                              flexDirection: "row",
+                              alignItems: "center",
+                              flexShrink: 0,
+                              marginBottom: 1,
+                            }}
+                          >
+                            <box
+                              id={`pc-workspace-tree-repo-toggle-${index}`}
+                              onMouseDown={(event) => {
+                                event.preventDefault()
+                                setWorkspaceTreeCollapsed(false)
+                                setFocusTarget("workspace")
+                                app.toggleRepoExpanded(parsed.repoId)
+                              }}
+                              style={{
+                                flexShrink: 0,
+                              }}
+                            >
+                              <text
+                                id={`pc-workspace-tree-row-caret-${index}`}
+                                content={caret}
+                                fg={colors.accentStrong}
+                                wrapMode="none"
+                                selectable={false}
+                              />
+                            </box>
+
+                            <text
+                              id={`pc-workspace-tree-row-project-name-${index}`}
+                              content={` ${projectLabel}`}
+                              fg={colors.accentStrong}
+                              wrapMode="none"
+                              selectable={false}
+                              style={{
+                                flexGrow: 1,
+                                flexShrink: 1,
+                              }}
+                            />
+
+                            <box
+                              id={`pc-workspace-tree-repo-add-${index}`}
+                              onMouseDown={(event) => {
+                                event.preventDefault()
+                                setWorkspaceTreeCollapsed(false)
+                                setFocusTarget("workspace")
+                                void app.createWorkspaceForRepo(parsed.repoId)
+                              }}
+                              style={{
+                                flexShrink: 0,
+                              }}
+                            >
+                              <text content="[+]" fg={colors.success} wrapMode="none" selectable={false} />
+                            </box>
+                          </box>
+                        )
+                      }
+
+                      const meta = parseWorkspaceTreeRowMeta(option.description)
+                      const plusText = `+${meta.added}`
+                      const minusText = `-${meta.removed}`
+                      const runtimeLabel = formatWorkspaceRuntimeLabel(meta.status, meta.busy)
+                      const statusText = runtimeLabel === "stopped" ? "idle" : runtimeLabel
+                      const statusColor = workspaceStatusColor(runtimeLabel, theme)
+                      const activityText = formatWorkspaceActivityAge(meta.activityAt)
+                      const workspaceActive = parsed.workspaceId === snapshot.selectedWorkspaceId
+                      const workspaceBg = workspaceActive
+                        ? colors.selectedBackground
+                        : treeSelected
+                          ? colors.markdownCodeBackground
+                          : colors.inputBackground
+                      const workspaceFg = workspaceActive || treeSelected ? colors.selectedText : colors.textSecondary
 
                       return (
                         <box
                           key={value}
                           id={`pc-workspace-tree-row-${index}`}
-                          height={isRepoRow ? 1 : 2}
-                          backgroundColor={selected ? colors.selectedBackground : "transparent"}
+                          height={2}
+                          backgroundColor={workspaceBg}
                           onMouseDown={(event) => {
                             event.preventDefault()
                             setWorkspaceTreeCollapsed(false)
-                            const parsed = parseWorkspaceTreeValue(option.value)
-                            setFocusTarget(parsed?.type === "workspace" ? "input" : "workspace")
-                            app.selectWorkspaceTreeOption(option, true)
+                            setFocusTarget("input")
+                            app.selectWorkspaceTreeOption(option, false)
                           }}
                           style={{
                             flexDirection: "column",
                             flexShrink: 0,
-                            marginBottom: isRepoRow ? 0 : 1,
+                            marginBottom: 1,
+                            paddingLeft: 1,
+                            paddingRight: 1,
                           }}
                         >
-                          {isRepoRow ? (
+                          <box
+                            id={`pc-workspace-tree-row-top-${index}`}
+                            height={1}
+                            style={{
+                              flexDirection: "row",
+                              alignItems: "center",
+                            }}
+                          >
                             <text
-                              id={`pc-workspace-tree-row-text-${index}`}
+                              id={`pc-workspace-tree-row-name-${index}`}
                               content={option.name}
-                              fg={selected ? colors.selectedText : colors.accentStrong}
+                              fg={workspaceFg}
                               wrapMode="none"
                               style={{
                                 flexGrow: 1,
                                 flexShrink: 1,
                               }}
                             />
-                          ) : (
-                            <>
-                              <box
-                                id={`pc-workspace-tree-row-top-${index}`}
-                                height={1}
-                                style={{
-                                  flexDirection: "row",
-                                  alignItems: "center",
-                                }}
-                              >
-                                <text
-                                  id={`pc-workspace-tree-row-name-${index}`}
-                                  content={option.name}
-                                  fg={selected ? colors.selectedText : colors.textSecondary}
-                                  wrapMode="none"
-                                  style={{
-                                    flexGrow: 1,
-                                    flexShrink: 1,
-                                  }}
-                                />
-                                <text
-                                  id={`pc-workspace-tree-row-activity-${index}`}
-                                  content={activityText}
-                                  fg={colors.textMuted}
-                                  wrapMode="none"
-                                  selectable={false}
-                                  style={{
-                                    flexShrink: 0,
-                                    marginLeft: 1,
-                                  }}
-                                />
-                              </box>
+                            <text
+                              id={`pc-workspace-tree-row-activity-${index}`}
+                              content={activityText}
+                              fg={colors.textMuted}
+                              wrapMode="none"
+                              selectable={false}
+                              style={{
+                                flexShrink: 0,
+                                marginLeft: 1,
+                              }}
+                            />
+                          </box>
 
-                              <box
-                                id={`pc-workspace-tree-row-bottom-${index}`}
-                                height={1}
-                                style={{
-                                  flexDirection: "row",
-                                  alignItems: "center",
-                                }}
-                              >
-                                <text
-                                  id={`pc-workspace-tree-row-status-${index}`}
-                                  content={statusText}
-                                  fg={statusColor}
-                                  wrapMode="none"
-                                  selectable={false}
-                                  style={{
-                                    flexGrow: 1,
-                                    flexShrink: 1,
-                                  }}
-                                />
-                                <text
-                                  id={`pc-workspace-tree-row-plus-${index}`}
-                                  content={plusText}
-                                  fg={colors.success}
-                                  wrapMode="none"
-                                  selectable={false}
-                                  style={{
-                                    flexShrink: 0,
-                                    marginRight: 1,
-                                  }}
-                                />
-                                <text
-                                  id={`pc-workspace-tree-row-minus-${index}`}
-                                  content={minusText}
-                                  fg={colors.error}
-                                  wrapMode="none"
-                                  selectable={false}
-                                  style={{
-                                    flexShrink: 0,
-                                  }}
-                                />
-                              </box>
-                            </>
-                          )}
+                          <box
+                            id={`pc-workspace-tree-row-bottom-${index}`}
+                            height={1}
+                            style={{
+                              flexDirection: "row",
+                              alignItems: "center",
+                            }}
+                          >
+                            <text
+                              id={`pc-workspace-tree-row-status-${index}`}
+                              content={statusText}
+                              fg={statusColor}
+                              wrapMode="none"
+                              selectable={false}
+                              style={{
+                                flexGrow: 1,
+                                flexShrink: 1,
+                              }}
+                            />
+                            <text
+                              id={`pc-workspace-tree-row-diff-${index}`}
+                              content={`${plusText}/${minusText}`}
+                              fg={colors.textMuted}
+                              wrapMode="none"
+                              selectable={false}
+                              style={{
+                                flexShrink: 0,
+                              }}
+                            />
+                          </box>
                         </box>
                       )
                     })}
