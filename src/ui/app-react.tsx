@@ -4472,16 +4472,16 @@ function PiConductorView({ app }: { app: PiConductorApp }) {
                       flexGrow: 1,
                     }}
                     rootOptions={{
-                      backgroundColor: "transparent",
+                      backgroundColor: colors.sidebarBackground,
                     }}
                     wrapperOptions={{
-                      backgroundColor: "transparent",
+                      backgroundColor: colors.sidebarBackground,
                     }}
                     viewportOptions={{
-                      backgroundColor: "transparent",
+                      backgroundColor: colors.sidebarBackground,
                     }}
                     contentOptions={{
-                      backgroundColor: "transparent",
+                      backgroundColor: colors.sidebarBackground,
                     }}
                   >
                     {snapshot.workspaceTreeOptions.map((option, index) => {
