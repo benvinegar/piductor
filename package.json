@@ -4,7 +4,7 @@
   "description": "Terminal-native control plane for Pi coding agents across git workspaces and PR branches.",
   "type": "module",
   "bin": {
-    "piductor": "./bin/piductor.mjs"
+    "piductor": "bin/piductor.mjs"
   },
   "files": [
     "bin",
